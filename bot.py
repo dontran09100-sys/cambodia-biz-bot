@@ -10,85 +10,163 @@ logging.basicConfig(
     level=logging.INFO
 )
 
+# ─── NỘI DUNG 2 NGÔN NGỮ ───────────────────────────────────────────────────
 
-def menu_keyboard():
+CONTENT = {
+    "km": {
+        "welcome": (
+            "👋 សួស្តី! ខ្ញុំជាជំនួយការរបស់ *NiMo Team*។\n\n"
+            "អ្នកមានសំណួរអ្វីអំពី *Cambodia Biz Agent*?\n"
+            "ជ្រើសរើសសំណួរខាងក្រោម — ខ្ញុំឆ្លើយភ្លាមៗ:"
+        ),
+        "menu_again": "តើអ្នកមានសំណួរអ្វីទៀត?\nជ្រើសសំណួរខាងក្រោម:",
+        "q1_label": "💬  ខ្ញុំមិនទាន់យល់ច្បាស់អំពីប្រព័ន្ធនេះ",
+        "q2_label": "🤔  ខ្ញុំមិនដឹងថាកញ្ចប់ណាសាកសម",
+        "q3_label": "😰  ខ្ញុំខ្លាចដំឡើងមិនបាន",
+        "consult": "💬 សួរ NiMo ដោយផ្ទាល់",
+        "back": "⬅️ សំណួរផ្សេងទៀត",
+        "q1": (
+            "💬 *ប្រព័ន្ធ Cambodia Biz Agent ដំណើរការយ៉ាងដូចម្តេច?*\n\n"
+            "យល់ឱ្យសាមញ្ញ: អ្នកមានបុគ្គលិក AI ចំនួន 5 នាក់ — ម្នាក់ធ្វើការងារ 1:\n\n"
+            "🔍 ស្រាវជ្រាវទីផ្សារ និងគូប្រជែង\n"
+            "📣 បង្កើតមាតិកា FB/TikTok/Instagram\n"
+            "💰 សរសេរទំព័រលក់ និងបិទការបញ្ជាទិញ\n"
+            "📦 ទទួលការបញ្ជាទិញ និងជូនដំណឹងដោយស្វ័យប្រវត្តិ\n"
+            "📊 របាយការណ៍ចំណូល និងបង្កើនប្រសិទ្ធភាព\n\n"
+            "អ្នកបញ្ជាជាភាសាខ្មែរ — AI ធ្វើការភ្លាមៗ។\n\n"
+            "មិនចាំបាច់ចេះសរសេរកូដ។ 🚀"
+        ),
+        "q2": (
+            "🤔 *កញ្ចប់ណាសាកសមជាមួយហាងរបស់អ្នក?*\n\n"
+            "🟦 *Basic $97* — ទើបស្គាល់ AI ចង់សាកល្បងមុន\n"
+            "→ បុគ្គលិក AI 5 នាក់ + ការណែនាំជាភាសាខ្មែរ + ការគាំទ្រ 30 ថ្ងៃ\n\n"
+            "⭐ *Pro $297* — ហាងដំណើរការ ចង់ស្វ័យប្រវត្តិ 24/7\n"
+            "→ Chatbot ឆ្លើយ + ប្រកាសដោយស្វ័យប្រវត្តិ + ទទួល booking\n\n"
+            "🟡 *VIP $597* — មិនចង់ដំឡើងខ្លួនឯង NiMo ធ្វើជំនួស\n"
+            "→ ដំឡើងរួច ប្រើបានភ្លាម ការគាំទ្រ 90 ថ្ងៃ\n\n"
+            "មិនប្រាកដ? ប្រាប់ NiMo អំពីហាងរបស់អ្នក — យើងណែនាំកញ្ចប់ត្រឹមត្រូវ 👇"
+        ),
+        "q3": (
+            "😰 *មិនចេះបច្ចេកវិទ្យា — អាចដំឡើងបានទេ?*\n\n"
+            "បាន! នេះជាហេតុផល:\n\n"
+            "✅ ការណែនាំជាភាសាខ្មែរ មានរូបភាពបង្ហាញជាជំហានៗ\n"
+            "✅ មានវីដេអូមើលតាម\n"
+            "✅ ប្រើ Bot ជួយ 24/7\n"
+            "✅ NiMo ផ្ទាល់ឆ្លើយពេលត្រូវការ\n\n"
+            "កញ្ចប់ VIP: NiMo អង្គុយដំឡើងជាមួយអ្នកតាម Zoom 2 ម៉ោង — "
+            "អ្នកគ្រាន់តែមើល ហើយចុចតាម។ 🎯"
+        ),
+    },
+    "en": {
+        "welcome": (
+            "👋 Hello! I'm the assistant of *NiMo Team*.\n\n"
+            "What are you wondering about *Cambodia Biz Agent*?\n"
+            "Choose a question below — I'll answer right away:"
+        ),
+        "menu_again": "Any other questions?\nChoose below:",
+        "q1_label": "💬  I don't understand how this system works",
+        "q2_label": "🤔  I don't know which plan fits me",
+        "q3_label": "😰  I'm afraid I can't install it",
+        "consult": "💬 Chat directly with NiMo",
+        "back": "⬅️ Other questions",
+        "q1": (
+            "💬 *How does Cambodia Biz Agent work?*\n\n"
+            "Simply put: you have 5 AI Employees — each does 1 job:\n\n"
+            "🔍 Market research & competitor analysis\n"
+            "📣 Create content for FB/TikTok/Instagram\n"
+            "💰 Write sales pages & close orders\n"
+            "📦 Auto-receive orders & send delivery notifications\n"
+            "📊 Revenue reports & weekly optimization\n\n"
+            "You give commands in Khmer or English — AI works instantly.\n\n"
+            "No coding needed. 🚀"
+        ),
+        "q2": (
+            "🤔 *Which plan fits your shop?*\n\n"
+            "🟦 *Basic $97* — New to AI, want to try first\n"
+            "→ 5 AI Employees + Khmer guide + 30-day support\n\n"
+            "⭐ *Pro $297* — Shop running, want full automation 24/7\n"
+            "→ Chatbot + auto-post + auto-booking\n\n"
+            "🟡 *VIP $597* — Don't want to install yourself, NiMo does it for you\n"
+            "→ Ready to use after handover, 90-day support\n\n"
+            "Not sure? Tell NiMo about your shop — we'll recommend the right plan in 5 mins 👇"
+        ),
+        "q3": (
+            "😰 *Not tech-savvy — can I still install it?*\n\n"
+            "Yes! Here's why:\n\n"
+            "✅ Step-by-step guide in Khmer with images\n"
+            "✅ Video tutorials to follow\n"
+            "✅ Bot support 24/7\n"
+            "✅ NiMo personally answers when needed\n\n"
+            "VIP plan: NiMo installs it with you via Zoom in 2 hours — "
+            "you just watch and click. 🎯"
+        ),
+    }
+}
+
+# ─── KEYBOARDS ──────────────────────────────────────────────────────────────
+
+def lang_keyboard():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ", callback_data="lang_km"),
+        InlineKeyboardButton("🇬🇧 English",    callback_data="lang_en"),
+    ]])
+
+def menu_keyboard(lang):
+    c = CONTENT[lang]
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬  Tôi chưa hiểu rõ hệ thống này", callback_data="q1")],
-        [InlineKeyboardButton("🤔  Tôi không biết gói nào phù hợp", callback_data="q2")],
-        [InlineKeyboardButton("😰  Tôi sợ cài không được", callback_data="q3")],
+        [InlineKeyboardButton(c["q1_label"], callback_data="q1")],
+        [InlineKeyboardButton(c["q2_label"], callback_data="q2")],
+        [InlineKeyboardButton(c["q3_label"], callback_data="q3")],
     ])
 
-
-def after_keyboard():
+def after_keyboard(lang):
+    c = CONTENT[lang]
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💬 Tư vấn thêm với NiMo", url=f"https://t.me/{NIMO_USERNAME}")],
-        [InlineKeyboardButton("⬅️ Câu hỏi khác", callback_data="menu")],
+        [InlineKeyboardButton(c["consult"], url=f"https://t.me/{NIMO_USERNAME}")],
+        [InlineKeyboardButton(c["back"],    callback_data="menu")],
     ])
 
+# ─── HANDLERS ───────────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Chào bạn! Tôi là trợ lý của *NiMo Team*.\n\n"
-        "Bạn đang băn khoăn điều gì về *Cambodia Biz Agent*?\n"
-        "Chọn câu hỏi bên dưới — tôi trả lời ngay:",
-        parse_mode="Markdown",
-        reply_markup=menu_keyboard()
+        "🇰🇭 ជ្រើសភាសា  |  🇬🇧 Choose language:",
+        reply_markup=lang_keyboard()
     )
-
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    data = query.data
 
-    if query.data == "menu":
+    # Chọn ngôn ngữ
+    if data.startswith("lang_"):
+        lang = data.split("_")[1]
+        context.user_data["lang"] = lang
+        c = CONTENT[lang]
         await query.edit_message_text(
-            "Bạn còn băn khoăn điều gì nữa không?\nChọn câu hỏi bên dưới:",
-            reply_markup=menu_keyboard()
-        )
-
-    elif query.data == "q1":
-        await query.edit_message_text(
-            "💬 *Hệ thống Cambodia Biz Agent hoạt động thế nào?*\n\n"
-            "Hiểu đơn giản: bạn có 5 Nhân Viên AI — mỗi người làm 1 việc:\n\n"
-            "🔍 Nghiên cứu thị trường & đối thủ\n"
-            "📣 Tạo content FB/TikTok/Instagram\n"
-            "💰 Viết trang bán hàng & chốt đơn\n"
-            "📦 Tự động nhận đơn & thông báo giao hàng\n"
-            "📊 Báo cáo doanh thu & tối ưu hàng tuần\n\n"
-            "Bạn ra lệnh bằng tiếng Khmer hoặc tiếng Việt — AI làm việc ngay lập tức.\n\n"
-            "Không cần biết lập trình. Không cần cài app phức tạp. 🚀",
+            c["welcome"],
             parse_mode="Markdown",
-            reply_markup=after_keyboard()
+            reply_markup=menu_keyboard(lang)
         )
+        return
 
-    elif query.data == "q2":
+    lang = context.user_data.get("lang", "km")
+    c = CONTENT[lang]
+
+    if data == "menu":
         await query.edit_message_text(
-            "🤔 *Gói nào phù hợp với shop của bạn?*\n\n"
-            "🟦 *Basic $97* — Mới biết đến AI, muốn thử trước\n"
-            "→ 5 Nhân Viên AI + hướng dẫn tiếng Khmer + hỗ trợ 30 ngày\n\n"
-            "⭐ *Pro $297* — Shop đang hoạt động, muốn tự động 24/7\n"
-            "→ Chatbot trả lời khách + tự động đăng bài + booking tự động\n\n"
-            "🟡 *VIP $597* — Không muốn tự cài, NiMo làm hết qua Zoom\n"
-            "→ Bàn giao xong là dùng được ngay, hỗ trợ 90 ngày\n\n"
-            "Chưa chắc? Nhắn NiMo kể quy mô shop — tư vấn đúng gói trong 5 phút 👇",
-            parse_mode="Markdown",
-            reply_markup=after_keyboard()
+            c["menu_again"],
+            reply_markup=menu_keyboard(lang)
         )
-
-    elif query.data == "q3":
+    elif data in ("q1", "q2", "q3"):
         await query.edit_message_text(
-            "😰 *Không rành công nghệ — có cài được không?*\n\n"
-            "Được! Đây là lý do:\n\n"
-            "✅ Hướng dẫn từng bước bằng tiếng Khmer\n"
-            "✅ Có ảnh minh họa & video xem theo\n"
-            "✅ Bot hỗ trợ 24/7 — nhắn bất cứ lúc nào\n"
-            "✅ NiMo sẵn sàng tư vấn thêm khi bạn cần\n\n"
-            "Gói VIP: NiMo ngồi cài cùng bạn qua Zoom 2 tiếng — bạn chỉ xem và bấm theo. "
-            "Xong là dùng được ngay 🎯",
+            c[data],
             parse_mode="Markdown",
-            reply_markup=after_keyboard()
+            reply_markup=after_keyboard(lang)
         )
 
+# ─── MAIN ───────────────────────────────────────────────────────────────────
 
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -96,7 +174,6 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     print("✅ Bot đang chạy...")
     app.run_polling(drop_pending_updates=True)
-
 
 if __name__ == "__main__":
     main()
