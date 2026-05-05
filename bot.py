@@ -475,7 +475,7 @@ CONTENT = {
             ),
             "package_msg": (
                 "\U0001F389 *\u1794\u1784\u1794\u17B6\u1793\u1787\u17D2\u179A\u17BE\u179F {label} \u2014 {price_usd}* ({price_riel})\n\n"
-                "{bank_details}\n\n"
+                "\U0001F4F2 *\u179F\u17BC\u1798 Scan QR ABA \u1781\u17B6\u1784\u179B\u17BE \u178A\u17BE\u1798\u17D2\u1794\u17B8\u1794\u1784\u17CB\u1794\u17D2\u179A\u17B6\u1780\u17CB*\n\n"
                 "\U0001F4B5 *\u1785\u17C6\u1793\u17BD\u1793\u1791\u17B9\u1780\u1794\u17D2\u179A\u17B6\u1780\u17CB: {price_usd}*\n\n"
                 "\u1794\u1793\u17D2\u1791\u17B6\u1794\u17CB\u1796\u17B8\u1795\u17D2\u1791\u17C1\u179A\u1794\u17D2\u179A\u17B6\u1780\u17CB\u17A0\u17BE\u1799 \u179F\u17BC\u1798\u1785\u17BB\u1785\u1794\u17CA\u17BC\u178F\u17BB\u1784\u1781\u17B6\u1784\u1780\u17D2\u179A\u17C4\u1798 \U0001F447"
             ),
@@ -907,8 +907,8 @@ CONTENT = {
             ),
             "package_msg": (
                 "\U0001F389 *You selected {label} \u2014 {price_usd}* ({price_riel})\n\n"
-                "{bank_details}\n\n"
-                "\U0001F4B5 *Amount to transfer: {price_usd}*\n\n"
+                "\U0001F4F2 *Scan the ABA QR code above to pay*\n\n"
+                "\U0001F4B5 *Amount: {price_usd}*\n\n"
                 "After transferring, tap the button below to send your receipt \U0001F447"
             ),
         },
@@ -1059,18 +1059,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         package = data.split("_")[1]
         info    = BANK_INFO[package]
         context.user_data["package"] = package
-        lang    = get_lang(context)
-        msg = s["package_msg"].format(
+
+        qr_files = {
+            "basic": "qr_97.png",
+            "pro":   "qr_297.png",
+            "vip":   "qr_597.png",
+        }
+        caption = s["package_msg"].format(
             label=info["label"],
             price_usd=info["price_usd"],
             price_riel=info["price_riel"],
-            bank_details=BANK_DETAILS[lang]
         )
-        await query.edit_message_text(
-            msg,
-            parse_mode="Markdown",
-            reply_markup=confirm_transfer_keyboard(context)
-        )
+        qr_path = qr_files[package]
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        try:
+            with open(qr_path, "rb") as qr_img:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=qr_img,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=confirm_transfer_keyboard(context)
+                )
+        except FileNotFoundError:
+            # Fallback: text only if QR file missing
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=caption,
+                parse_mode="Markdown",
+                reply_markup=confirm_transfer_keyboard(context)
+            )
         return
 
     # Consult
