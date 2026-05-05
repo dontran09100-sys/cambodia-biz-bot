@@ -5,11 +5,49 @@ Token: @NiMoBizAgent_bot (Railway)
 """
 
 import logging
+import io
+import qrcode
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, filters
 )
+
+# \u2500\u2500\u2500 KHQR GENERATOR \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+def _tlv(tag: str, value: str) -> str:
+    return f"{tag}{len(value):02d}{value}"
+
+def _crc16(data: str) -> int:
+    crc = 0xFFFF
+    for ch in data:
+        crc ^= ord(ch) << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) if crc & 0x8000 else (crc << 1)
+            crc &= 0xFFFF
+    return crc
+
+def make_aba_qr(amount_usd: float) -> io.BytesIO:
+    aba_info = _tlv("00", "abaakhppxxx@abaa") + _tlv("01", "008113648")
+    amount_s = str(int(amount_usd)) if amount_usd == int(amount_usd) else f"{amount_usd:.2f}"
+    body = (
+        _tlv("00", "01") + _tlv("01", "12") +
+        _tlv("29", aba_info) +
+        _tlv("52", "5999") + _tlv("53", "840") +
+        _tlv("54", amount_s) +
+        _tlv("58", "KH") +
+        _tlv("59", "SOVANNY LONG") +
+        _tlv("60", "PHNOM PENH") +
+        "6304"
+    )
+    full = body + f"{_crc16(body):04X}"
+    buf = io.BytesIO()
+    qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+    qr.add_data(full)
+    qr.make(fit=True)
+    qr.make_image(fill_color="black", back_color="white").save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 # \u2500\u2500\u2500 CONFIG \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
@@ -1060,38 +1098,24 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         info    = BANK_INFO[package]
         context.user_data["package"] = package
 
-        qr_files = {
-            "basic": "qr_97.png",
-            "pro":   "qr_297.png",
-            "vip":   "qr_597.png",
-        }
+        amounts = {"basic": 97, "pro": 297, "vip": 597}
         caption = s["package_msg"].format(
             label=info["label"],
             price_usd=info["price_usd"],
             price_riel=info["price_riel"],
         )
-        qr_path = qr_files[package]
         try:
             await query.message.delete()
         except Exception:
             pass
-        try:
-            with open(qr_path, "rb") as qr_img:
-                await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
-                    photo=qr_img,
-                    caption=caption,
-                    parse_mode="Markdown",
-                    reply_markup=confirm_transfer_keyboard(context)
-                )
-        except FileNotFoundError:
-            # Fallback: text only if QR file missing
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=caption,
-                parse_mode="Markdown",
-                reply_markup=confirm_transfer_keyboard(context)
-            )
+        qr_buf = make_aba_qr(amounts[package])
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=qr_buf,
+            caption=caption,
+            parse_mode="Markdown",
+            reply_markup=confirm_transfer_keyboard(context)
+        )
         return
 
     # Consult
