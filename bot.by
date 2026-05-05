@@ -1,0 +1,634 @@
+"""
+Cambodia Biz Agent — Bot Khmer + English
+FAQ + buy flow + admin support
+Token: @NiMoBizAgent_bot (Railway)
+"""
+
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ContextTypes, filters
+)
+
+# ─── CONFIG ─────────────────────────────────────────────────────────────────
+
+TOKEN    = "8750588238:AAFUJ3o6iR7Cu92on2HdsvLhKP5pQHs15Bo"
+ADMIN_ID = 8704923191
+
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+
+# ─── PAYMENT INFO ────────────────────────────────────────────────────────────
+
+BANK_INFO = {
+    "basic": {"label": "Basic", "price_usd": "$97",  "price_riel": "≈ 400,000 Riel"},
+    "pro":   {"label": "Pro",   "price_usd": "$297", "price_riel": "≈ 1,200,000 Riel"},
+    "vip":   {"label": "VIP",   "price_usd": "$597", "price_riel": "≈ 2,400,000 Riel"},
+}
+
+BANK_DETAILS = {
+    "km": (
+        "💳 *ព័ត៌មានការផ្ទេរប្រាក់*\n\n"
+        "🏦 *ABA Bank*\n"
+        "លេខគណនី: `000 123 456`\n"
+        "ឈ្មោះ: NIMO TEAM\n\n"
+        "📱 *Wing Money*\n"
+        "លេខទូរស័ព្ទ: `012 345 678`\n"
+        "ឈ្មោះ: NIMO TEAM\n\n"
+        "⚠️ *សម្គាល់:* សូមសរសេរលេខកូដបញ្ជាទិញ NiMo ផ្ញើអោយ ក្នុងការផ្ទេរ។"
+    ),
+    "en": (
+        "💳 *Payment Details*\n\n"
+        "🏦 *ABA Bank*\n"
+        "Account: `000 123 456`\n"
+        "Name: NIMO TEAM\n\n"
+        "📱 *Wing Money*\n"
+        "Phone: `012 345 678`\n"
+        "Name: NIMO TEAM\n\n"
+        "⚠️ *Note:* Include the order code NiMo provides in the transfer remark."
+    ),
+}
+
+# ─── CONTENT ─────────────────────────────────────────────────────────────────
+
+CONTENT = {
+    "km": {
+        "faq": {
+            "q_system": {
+                "label": "💬 ខ្ញុំមិនទាន់យល់ច្បាស់អំពីប្រព័ន្ធនេះ",
+                "answer": (
+                    "💬 *ប្រព័ន្ធ Cambodia Biz Agent ដំណើរការយ៉ាងដូចម្តេច?*\n\n"
+                    "យល់ឱ្យសាមញ្ញ: បង មាន *បុគ្គលិក AI ចំនួន 5 នាក់* — ម្នាក់ធ្វើការងារ 1:\n\n"
+                    "🔍 ស្រាវជ្រាវទីផ្សារ និងគូប្រជែង\n"
+                    "📣 បង្កើតមាតិកា FB/TikTok/Instagram\n"
+                    "💰 សរសេរទំព័រលក់ និងបិទការបញ្ជាទិញ\n"
+                    "📦 ទទួលការបញ្ជាទិញ និងជូនដំណឹងដោយស្វ័យប្រវត្តិ\n"
+                    "📊 របាយការណ៍ចំណូល និងបង្កើនប្រសិទ្ធភាព\n\n"
+                    "បងបញ្ជាជាភាសាខ្មែរ — AI ធ្វើការភ្លាមៗ។\n\n"
+                    "មិនចាំបាច់ចេះសរសេរកូដ។ 🚀"
+                ),
+            },
+            "q_which_plan": {
+                "label": "🤔 ខ្ញុំមិនដឹងថាកញ្ចប់ណាសាកសម",
+                "answer": (
+                    "🤔 *កញ្ចប់ណាសាកសមជាមួយហាងរបស់បង?*\n\n"
+                    "🟦 *Basic $97* — ទើបស្គាល់ AI ចង់សាកល្បងមុន\n"
+                    "→ បុគ្គលិក AI 5 នាក់ + ការណែនាំជាភាសាខ្មែរ + ការគាំទ្រ 30 ថ្ងៃ\n\n"
+                    "⭐ *Pro $297* — ហាងដំណើរការ ចង់ស្វ័យប្រវត្តិ 24/7\n"
+                    "→ Chatbot ឆ្លើយ + ប្រកាសដោយស្វ័យប្រវត្តិ + ទទួល booking\n\n"
+                    "🟡 *VIP $597* — មិនចង់ដំឡើងខ្លួនឯង NiMo ធ្វើជំនួស\n"
+                    "→ ដំឡើងរួច ប្រើបានភ្លាម ការគាំទ្រ 90 ថ្ងៃ\n\n"
+                    "មិនប្រាកដ? ប្រាប់ NiMo អំពីហាងរបស់បង — យើងណែនាំកញ្ចប់ត្រឹមត្រូវ 👇"
+                ),
+            },
+            "q_tech": {
+                "label": "😰 ខ្ញុំខ្លាចដំឡើងមិនបាន",
+                "answer": (
+                    "😰 *មិនចេះបច្ចេកវិទ្យា — អាចដំឡើងបានទេ?*\n\n"
+                    "បាន! នេះជាហេតុផល:\n\n"
+                    "✅ ការណែនាំជាភាសាខ្មែរ មានរូបភាពបង្ហាញជាជំហានៗ\n"
+                    "✅ មានវីដេអូមើលតាម\n"
+                    "✅ ប្រើ Bot ជួយ 24/7\n"
+                    "✅ NiMo ផ្ទាល់ឆ្លើយពេលត្រូវការ\n\n"
+                    "កញ្ចប់ VIP: NiMo អង្គុយដំឡើងជាមួយបងតាម Zoom 2 ម៉ោង — "
+                    "បងគ្រាន់តែមើល ហើយចុចតាម។ 🎯"
+                ),
+            },
+        },
+        "cats": {
+            "cat_intro": {
+                "label": "🔍 ស្វែងយល់អំពី Cambodia Biz Agent",
+                "questions": ["q_system", "q_which_plan", "q_tech"],
+            },
+        },
+        "s": {
+            "welcome": (
+                "👋 សួស្តី! ខ្ញុំជាជំនួយការរបស់ *NiMo Team*។\n\n"
+                "បងមានសំណួរអ្វីអំពី *Cambodia Biz Agent*?\n"
+                "ជ្រើសសំណួរខាងក្រោម — ខ្ញុំឆ្លើយភ្លាមៗ 👇"
+            ),
+            "choose_cat":       "ជ្រើសសំណួរដែលបងចង់ដឹង:",
+            "buy_title": (
+                "🎉 *ល្អណាស់! បងចង់ជ្រើសកញ្ចប់ណា?*\n\n"
+                "🟦 *Basic $97* — សាកល្បងមុន\n"
+                "⭐ *Pro $297* — ស្វ័យប្រវត្តិ 24/7\n"
+                "🟡 *VIP $597* — NiMo ដំឡើងជំនួស\n\n"
+                "ជ្រើសកញ្ចប់ 👇"
+            ),
+            "buy_btn":          "💳 ខ្ញុំចង់ទិញឥឡូវ",
+            "consult_btn":      "💬 សួរ NiMo ដោយផ្ទាល់",
+            "back_btn":         "⬅️ ត្រឡប់ទៅម៉ឺនុយ",
+            "back_cat":         "⬅️ សំណួរផ្សេងទៀត",
+            "unsure_btn":       "🤔 ខ្ញុំមិនទាន់ប្រាកដ — ត្រូវការពិគ្រោះ",
+            "consult_msg": (
+                "💬 *អរគុណបងដែលបានទាក់ទង NiMo!*\n\n"
+                "NiMo នឹងឆ្លើយតបបងឆាប់ៗ។\n\n"
+                "⏳ សូមរង់ចាំបន្តិច ❤️"
+            ),
+            "end_consult_btn":  "🔚 បញ្ចប់ — ត្រឡប់ទៅម៉ឺនុយ",
+            "end_consult_msg":  "✅ បានបញ្ចប់។ អរគុណបង ❤️\n\nចុច /start ដើម្បីបើកម៉ឺនុយ។",
+            "confirm_paid_btn": "✅ ខ្ញុំបានផ្ទេរប្រាក់រួចហើយ",
+            "ask_more_btn":     "❓ ខ្ញុំត្រូវការសួរបន្ថែម",
+            "view_payment_btn": "💳 មើលព័ត៌មានផ្ទេរប្រាក់",
+            "unknown_msg":      "ខ្ញុំទទួលបានសារបងហើយ ❤️\n\nបងចង់:",
+            "ask_bill":         "📸 *ជំហានទី 1/3: ផ្ញើរូបភាពបង្កាន់ដៃ*\n\nសូម *ថតអេក្រង់* ការផ្ទេរប្រាក់ 👇",
+            "need_photo":       "⚠️ សូមផ្ញើ *រូបភាព* បង្កាន់ដៃ 📸",
+            "ask_name":         "✅ ទទួលបានរូបភាពហើយ!\n\n👤 *ជំហានទី 2/3: ឈ្មោះពេញ*\n\nសូមវាយឈ្មោះរបស់បង:",
+            "need_text":        "⚠️ សូមវាយជាអក្សរ។",
+            "ask_phone":        "✅ ទទួលបានឈ្មោះហើយ!\n\n📱 *ជំហានទី 3/3: លេខទូរស័ព្ទ*\n\nសូមបញ្ចូលលេខទូរស័ព្ទ:",
+            "complete_msg": (
+                "🎉 *ទទួលបានព័ត៌មានគ្រប់គ្រាន់ហើយ!*\n\n"
+                "📋 *សង្ខេបការបញ្ជាទិញ:*\n"
+                "• លេខកូដ: `{order_id}`\n"
+                "• ឈ្មោះ: {name}\n"
+                "• ទូរស័ព្ទ: {phone}\n"
+                "• កញ្ចប់: {label} ({price_usd})\n\n"
+                "NiMo នឹងពិនិត្យ និងបញ្ជាក់ក្នុង *30 នាទី* ⏰\n\n"
+                "អរគុណបងដែលទុកចិត្ត NiMo ❤️"
+            ),
+            "package_msg": (
+                "🎉 *បងបានជ្រើស {label} — {price_usd}* ({price_riel})\n\n"
+                "{bank_details}\n\n"
+                "💵 *ចំនួនទឹកប្រាក់: {price_usd}*\n\n"
+                "បន្ទាប់ពីផ្ទេរប្រាក់ហើយ សូមចុចប៊ូតុងខាងក្រោម 👇"
+            ),
+        },
+    },
+
+    "en": {
+        "faq": {
+            "q_system": {
+                "label": "💬 I don't understand how this system works",
+                "answer": (
+                    "💬 *How does Cambodia Biz Agent work?*\n\n"
+                    "Simply put: you get *5 AI Employees* — each does 1 job:\n\n"
+                    "🔍 Market research & competitor analysis\n"
+                    "📣 Create content for FB/TikTok/Instagram\n"
+                    "💰 Write sales pages & close orders\n"
+                    "📦 Auto-receive orders & send delivery notifications\n"
+                    "📊 Revenue reports & weekly optimization\n\n"
+                    "You give commands in Khmer or English — AI works instantly.\n\n"
+                    "No coding needed. 🚀"
+                ),
+            },
+            "q_which_plan": {
+                "label": "🤔 I don't know which plan fits me",
+                "answer": (
+                    "🤔 *Which plan fits your shop?*\n\n"
+                    "🟦 *Basic $97* — New to AI, want to try first\n"
+                    "→ 5 AI Employees + Khmer guide + 30-day support\n\n"
+                    "⭐ *Pro $297* — Shop running, want full automation 24/7\n"
+                    "→ Chatbot + auto-post + auto-booking\n\n"
+                    "🟡 *VIP $597* — Don't want to install yourself\n"
+                    "→ NiMo installs everything, ready to use, 90-day support\n\n"
+                    "Not sure? Tell NiMo about your shop — we'll recommend the right plan in 5 mins 👇"
+                ),
+            },
+            "q_tech": {
+                "label": "😰 I'm afraid I can't install it",
+                "answer": (
+                    "😰 *Not tech-savvy — can I still install it?*\n\n"
+                    "Yes! Here's why:\n\n"
+                    "✅ Step-by-step guide in Khmer with images\n"
+                    "✅ Video tutorials to follow\n"
+                    "✅ Bot support 24/7\n"
+                    "✅ NiMo personally answers when needed\n\n"
+                    "VIP plan: NiMo installs it with you via Zoom in 2 hours — "
+                    "you just watch and click. 🎯"
+                ),
+            },
+        },
+        "cats": {
+            "cat_intro": {
+                "label": "🔍 Learn about Cambodia Biz Agent",
+                "questions": ["q_system", "q_which_plan", "q_tech"],
+            },
+        },
+        "s": {
+            "welcome": (
+                "👋 Hello! I'm the assistant of *NiMo Team*.\n\n"
+                "What are you wondering about *Cambodia Biz Agent*?\n"
+                "Choose a question below — I'll answer right away 👇"
+            ),
+            "choose_cat":       "Choose a question:",
+            "buy_title": (
+                "🎉 *Great! Which plan do you want?*\n\n"
+                "🟦 *Basic $97* — Try it first\n"
+                "⭐ *Pro $297* — Full automation 24/7\n"
+                "🟡 *VIP $597* — NiMo installs it for you\n\n"
+                "Choose a plan 👇"
+            ),
+            "buy_btn":          "💳 I WANT TO BUY NOW",
+            "consult_btn":      "💬 Chat directly with NiMo",
+            "back_btn":         "⬅️ Back to main menu",
+            "back_cat":         "⬅️ Other questions",
+            "unsure_btn":       "🤔 I'm not sure — need advice",
+            "consult_msg": (
+                "💬 *Thank you for contacting NiMo!*\n\n"
+                "Your message has been forwarded to our team.\n\n"
+                "⏳ Please wait a moment — we'll reply shortly. ❤️"
+            ),
+            "end_consult_btn":  "🔚 End consultation — back to menu",
+            "end_consult_msg":  "✅ Consultation ended. Thank you ❤️\n\nType /start to open the menu again.",
+            "confirm_paid_btn": "✅ I have transferred — send receipt",
+            "ask_more_btn":     "❓ I have more questions",
+            "view_payment_btn": "💳 View payment details",
+            "unknown_msg":      "I received your message ❤️\n\nWhat would you like to do?",
+            "ask_bill":         "📸 *Step 1/3: Send payment receipt*\n\nPlease *screenshot* the bank transfer confirmation 👇",
+            "need_photo":       "⚠️ Please send a *photo* of your receipt 📸",
+            "ask_name":         "✅ Receipt received!\n\n👤 *Step 2/3: Full name*\n\nPlease enter your full name:",
+            "need_text":        "⚠️ Please enter text.",
+            "ask_phone":        "✅ Name received!\n\n📱 *Step 3/3: Phone number*\n\nPlease enter your phone number:",
+            "complete_msg": (
+                "🎉 *All information received!*\n\n"
+                "📋 *Order summary:*\n"
+                "• Order ID: `{order_id}`\n"
+                "• Name: {name}\n"
+                "• Phone: {phone}\n"
+                "• Plan: {label} ({price_usd})\n\n"
+                "NiMo will verify and confirm within *30 minutes* ⏰\n\n"
+                "Thank you for trusting NiMo ❤️"
+            ),
+            "package_msg": (
+                "🎉 *You selected {label} — {price_usd}* ({price_riel})\n\n"
+                "{bank_details}\n\n"
+                "💵 *Amount to transfer: {price_usd}*\n\n"
+                "After transferring, tap the button below to send your receipt 👇"
+            ),
+        },
+    },
+}
+
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
+
+def get_lang(context) -> str:
+    return context.user_data.get("lang", "km")
+
+def C(context):
+    return CONTENT[get_lang(context)]
+
+# ─── KEYBOARDS ───────────────────────────────────────────────────────────────
+
+def lang_keyboard():
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ", callback_data="lang_km"),
+        InlineKeyboardButton("🇬🇧 English",    callback_data="lang_en"),
+    ]])
+
+def main_menu_keyboard(context):
+    c = C(context)
+    s = c["s"]
+    buttons = [
+        [InlineKeyboardButton(cat["label"], callback_data=cat_id)]
+        for cat_id, cat in c["cats"].items()
+    ]
+    buttons.append([InlineKeyboardButton(s["buy_btn"],     callback_data="buy")])
+    buttons.append([InlineKeyboardButton(s["consult_btn"], callback_data="consult")])
+    return InlineKeyboardMarkup(buttons)
+
+def category_menu_keyboard(cat_id, context):
+    c = C(context)
+    cat = c["cats"][cat_id]
+    buttons = [
+        [InlineKeyboardButton(c["faq"][q_id]["label"], callback_data=q_id)]
+        for q_id in cat["questions"]
+    ]
+    buttons.append([InlineKeyboardButton(c["s"]["back_btn"], callback_data="main_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+def after_answer_keyboard(cat_id, context):
+    s = C(context)["s"]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(s["buy_btn"],     callback_data="buy")],
+        [InlineKeyboardButton(s["back_cat"],    callback_data=cat_id)],
+        [InlineKeyboardButton(s["back_btn"],    callback_data="main_menu")],
+        [InlineKeyboardButton(s["consult_btn"], callback_data="consult")],
+    ])
+
+def buy_keyboard(context):
+    s = C(context)["s"]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🟦 Basic $97  (≈ 400,000 Riel)",   callback_data="buy_basic")],
+        [InlineKeyboardButton("⭐ Pro $297   (≈ 1,200,000 Riel)", callback_data="buy_pro")],
+        [InlineKeyboardButton("🟡 VIP $597  (≈ 2,400,000 Riel)",  callback_data="buy_vip")],
+        [InlineKeyboardButton(s["unsure_btn"], callback_data="q_which_plan")],
+        [InlineKeyboardButton(s["back_btn"],   callback_data="main_menu")],
+    ])
+
+def confirm_transfer_keyboard(context):
+    s = C(context)["s"]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(s["confirm_paid_btn"], callback_data="confirm_paid")],
+        [InlineKeyboardButton(s["ask_more_btn"],     callback_data="main_menu")],
+    ])
+
+def end_consult_keyboard(context):
+    s = C(context)["s"]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(s["end_consult_btn"], callback_data="end_consult")],
+    ])
+
+# ─── HANDLERS ────────────────────────────────────────────────────────────────
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🇰🇭 ជ្រើសភាសា  |  🇬🇧 Choose language:",
+        reply_markup=lang_keyboard()
+    )
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data  = query.data
+
+    # Language selection
+    if data.startswith("lang_"):
+        lang = data.split("_")[1]
+        context.user_data["lang"] = lang
+        c = CONTENT[lang]
+        await query.edit_message_text(
+            c["s"]["welcome"],
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard(context)
+        )
+        return
+
+    c = C(context)
+    s = c["s"]
+
+    # Main menu
+    if data == "main_menu":
+        await query.edit_message_text(
+            s["welcome"],
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard(context)
+        )
+        return
+
+    # Category
+    if data in c["cats"]:
+        cat = c["cats"][data]
+        await query.edit_message_text(
+            f"*{cat['label']}*\n\n{s['choose_cat']}",
+            parse_mode="Markdown",
+            reply_markup=category_menu_keyboard(data, context)
+        )
+        return
+
+    # FAQ answer
+    if data in c["faq"]:
+        cat_id = next(
+            (cid for cid, cat in c["cats"].items() if data in cat["questions"]),
+            "main_menu"
+        )
+        await query.edit_message_text(
+            c["faq"][data]["answer"],
+            parse_mode="Markdown",
+            reply_markup=after_answer_keyboard(cat_id, context)
+        )
+        return
+
+    # Buy menu
+    if data == "buy":
+        await query.edit_message_text(
+            s["buy_title"],
+            parse_mode="Markdown",
+            reply_markup=buy_keyboard(context)
+        )
+        return
+
+    # Package selected
+    if data.startswith("buy_"):
+        package = data.split("_")[1]
+        info    = BANK_INFO[package]
+        context.user_data["package"] = package
+        lang    = get_lang(context)
+        msg = s["package_msg"].format(
+            label=info["label"],
+            price_usd=info["price_usd"],
+            price_riel=info["price_riel"],
+            bank_details=BANK_DETAILS[lang]
+        )
+        await query.edit_message_text(
+            msg,
+            parse_mode="Markdown",
+            reply_markup=confirm_transfer_keyboard(context)
+        )
+        return
+
+    # Consult
+    if data == "consult":
+        context.user_data["consulting"] = True
+        await query.edit_message_text(
+            s["consult_msg"],
+            parse_mode="Markdown",
+            reply_markup=end_consult_keyboard(context)
+        )
+        if ADMIN_ID:
+            user = query.from_user
+            lang = get_lang(context)
+            try:
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=(
+                        f"💬 *Khách cần tư vấn [{lang.upper()}]*\n"
+                        f"👤 {user.full_name} (@{user.username or 'no username'})\n"
+                        f"`#cid:{user.id}`"
+                    ),
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"Admin notify error: {e}")
+        return
+
+    # End consult
+    if data == "end_consult":
+        context.user_data["consulting"] = False
+        await query.edit_message_text(s["end_consult_msg"])
+        return
+
+    # Confirm paid
+    if data == "confirm_paid":
+        if "package" not in context.user_data:
+            await query.edit_message_text(s["welcome"], reply_markup=main_menu_keyboard(context))
+            return
+        context.user_data["awaiting"] = "bill_photo"
+        await query.edit_message_text(s["ask_bill"], parse_mode="Markdown")
+        return
+
+# ─── MESSAGE HANDLER ─────────────────────────────────────────────────────────
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    awaiting   = context.user_data.get("awaiting")
+    consulting = context.user_data.get("consulting", False)
+    user       = update.effective_user
+    s          = C(context)["s"]
+
+    # Admin reply → forward to customer
+    if (
+        user.id == ADMIN_ID
+        and update.message.reply_to_message
+        and update.message.reply_to_message.text
+        and "#cid:" in update.message.reply_to_message.text
+    ):
+        try:
+            cid_text = update.message.reply_to_message.text.split("#cid:")[1].strip()
+            cust_id  = int(cid_text.split()[0])
+            await context.bot.send_message(
+                chat_id=cust_id,
+                text=f"💬 *NiMo:*\n\n{update.message.text}",
+                parse_mode="Markdown"
+            )
+            await update.message.reply_text("✅ Sent.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ {e}")
+        return
+
+    # Consulting mode → forward to admin
+    if consulting and not awaiting:
+        text = update.message.text or "(media)"
+        if ADMIN_ID:
+            try:
+                fwd = (
+                    f"💬 *{user.full_name}* (@{user.username or 'no username'})\n"
+                    f"━━━━━━━━━━━━━\n{text}\n━━━━━━━━━━━━━\n`#cid:{user.id}`"
+                )
+                await context.bot.send_message(chat_id=ADMIN_ID, text=fwd, parse_mode="Markdown")
+                if update.message.photo:
+                    await context.bot.send_photo(
+                        chat_id=ADMIN_ID,
+                        photo=update.message.photo[-1].file_id,
+                        caption=f"📸 {user.full_name}\n`#cid:{user.id}`",
+                        parse_mode="Markdown"
+                    )
+            except Exception as e:
+                logging.error(f"Forward error: {e}")
+        await update.message.reply_text("✅", reply_markup=end_consult_keyboard(context))
+        return
+
+    # No active flow → show options
+    if not awaiting:
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(s["view_payment_btn"], callback_data="buy")],
+            [InlineKeyboardButton(s["consult_btn"],      callback_data="consult")],
+            [InlineKeyboardButton(s["back_btn"],         callback_data="main_menu")],
+        ])
+        await update.message.reply_text(s["unknown_msg"], reply_markup=kb)
+        return
+
+    # Bill photo step
+    if awaiting == "bill_photo":
+        if not update.message.photo:
+            await update.message.reply_text(s["need_photo"], parse_mode="Markdown")
+            return
+        context.user_data["bill_photo_id"] = update.message.photo[-1].file_id
+        context.user_data["awaiting"]       = "name"
+        await update.message.reply_text(s["ask_name"], parse_mode="Markdown")
+        return
+
+    # Name step
+    if awaiting == "name":
+        if not update.message.text:
+            await update.message.reply_text(s["need_text"])
+            return
+        context.user_data["name"]     = update.message.text.strip()
+        context.user_data["awaiting"] = "phone"
+        await update.message.reply_text(s["ask_phone"], parse_mode="Markdown")
+        return
+
+    # Phone step → complete
+    if awaiting == "phone":
+        if not update.message.text:
+            await update.message.reply_text(s["need_text"])
+            return
+        from datetime import datetime
+        context.user_data["phone"]    = update.message.text.strip()
+        context.user_data["order_id"] = f"NIMO-{datetime.now().strftime('%y%m%d-%H%M')}"
+        context.user_data["awaiting"] = None
+
+        package = context.user_data["package"]
+        info    = BANK_INFO[package]
+
+        await update.message.reply_text(
+            s["complete_msg"].format(
+                order_id=context.user_data["order_id"],
+                name=context.user_data["name"],
+                phone=context.user_data["phone"],
+                label=info["label"],
+                price_usd=info["price_usd"]
+            ),
+            parse_mode="Markdown"
+        )
+
+        if ADMIN_ID:
+            lang = get_lang(context)
+            msg  = (
+                f"🔴 *ĐƠN MỚI [{lang.upper()}]*\n\n"
+                f"📋 Mã đơn: `{context.user_data['order_id']}`\n"
+                f"👤 Tên: {context.user_data['name']}\n"
+                f"📱 SĐT: {context.user_data['phone']}\n"
+                f"📦 Gói: *{info['label']}* — {info['price_usd']}\n"
+                f"🆔 Telegram ID: `{user.id}`\n\n"
+                f"👉 Lệnh xác nhận:\n"
+                f"`/xacnhan {context.user_data['order_id']} {package}`"
+            )
+            try:
+                await context.bot.send_photo(
+                    chat_id=ADMIN_ID,
+                    photo=context.user_data["bill_photo_id"],
+                    caption=msg,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logging.error(f"Admin notify error: {e}")
+        return
+
+# ─── ADMIN COMMANDS ──────────────────────────────────────────────────────────
+
+async def xacnhan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔")
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Syntax: `/xacnhan NIMO-ID package`", parse_mode="Markdown")
+        return
+    await update.message.reply_text(
+        f"✅ Confirmed order `{context.args[0]}` — plan `{context.args[1]}`.\n"
+        "_Auto-delivery will be added in the next step._",
+        parse_mode="Markdown"
+    )
+
+async def tra(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin replies to customer: /tra <customer_id> <message>"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔")
+        return
+    if len(context.args) < 2:
+        await update.message.reply_text("Syntax: `/tra <customer_id> <message>`", parse_mode="Markdown")
+        return
+    try:
+        cid  = int(context.args[0])
+        text = " ".join(context.args[1:])
+        await context.bot.send_message(
+            chat_id=cid,
+            text=f"💬 *NiMo:*\n\n{text}",
+            parse_mode="Markdown"
+        )
+        await update.message.reply_text("✅ Sent.")
+    except Exception as e:
+        await update.message.reply_text(f"❌ {e}")
+
+# ─── MAIN ────────────────────────────────────────────────────────────────────
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    app.add_handler(CommandHandler("start",   start))
+    app.add_handler(CommandHandler("xacnhan", xacnhan))
+    app.add_handler(CommandHandler("tra",     tra))
+    app.add_handler(CallbackQueryHandler(handle_callback))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_message))
+    print("✅ Bot (KM + EN) đang chạy... /start để test!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
