@@ -1162,6 +1162,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
             except Exception as e:
                 logging.error(f"Admin notify error: {e}")
+            # Ghi v\xe0o Sheet CRM
+            asyncio.create_task(_post_to_sheet({
+                "name":     user.full_name,
+                "telegram": f"@{user.username}" if user.username else str(user.id),
+                "cid":      str(user.id),
+                "source":   "consult-request",
+                "lang":     lang
+            }))
         return
 
     # End consult
