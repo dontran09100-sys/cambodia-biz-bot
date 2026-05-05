@@ -53,10 +53,12 @@ def make_aba_qr(amount_usd: float) -> io.BytesIO:
     return buf
 
 # \u2500\u2500\u2500 CONFIG \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+import os
 
-TOKEN           = "8750588238:AAFUJ3o6iR7Cu92on2HdsvLhKP5pQHs15Bo"
-ADMIN_ID        = 8704923191
-APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz3OQtNOOOgXmCwbO-sODdFw_TDQd8zRAMwtEbqML1H3pApYywaYeXzr0gcE44OjOOF/exec"
+TOKEN           = os.environ.get("BOT_TOKEN", "8750588238:AAFUJ3o6iR7Cu92on2HdsvLhKP5pQHs15Bo")
+ADMIN_ID        = int(os.environ.get("ADMIN_ID", "8704923191"))
+APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz3OQtNOOOgXmCwbO-sODdFw_TDQd8zRAMwtEbqML1H3pApYywaYeXzr0gcE44OjOOF/exec")
+STAFF_USERNAME  = os.environ.get("STAFF_USERNAME", "sovanny68")
 
 async def _post_to_sheet(data: dict):
     def _send():
@@ -503,10 +505,10 @@ CONTENT = {
             "back_cat":         "\u2b05\ufe0f \u179f\u17c6\u178e\u17bd\u179a\u1795\u17d2\u179f\u17c1\u1784\u1791\u17c0\u178f",
             "unsure_btn":       "\U0001f914 \u1781\u17d2\u1789\u17bb\u17c6\u1798\u17b7\u1793\u1791\u17b6\u1793\u17cb\u1794\u17d2\u179a\u17b6\u1780\u178a \u2014 \u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\u1796\u17b7\u1782\u17d2\u179a\u17c4\u17c7",
             "consult_msg": (
-                "\U0001f4ac *\u179f\u17bd\u179f\u17d2\u178f\u17b8! NiMo \u179a\u17b8\u1780\u179a\u17b6\u1799\u1787\u17bd\u1799\u1794\u1784* \u2764\ufe0f\n\n"
-                "\u1785\u17bb\u1785\u179b\u17b8\u1784\u1781\u17b6\u1784\u1780\u17d2\u179a\u17c4\u1798 \u178a\u17be\u1798\u17d2\u1794\u17b8\u1791\u17c6\u1793\u17b6\u1780\u17cb\u1791\u17c6\u1793\u1784\u1795\u17d2\u1791\u17b6\u179b\u17cb\u1787\u17b6\u1798\u17bd\u1799\u17a2\u17d2\u1793\u1780\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6:\n\n"
-                "\U0001f449 [Chat with NiMo Advisor](https://t.me/sovanny68)\n\n"
-                "_\u1794\u1793\u17d2\u1791\u17b6\u1794\u17cb\u1796\u17b8\u1791\u1791\u17bd\u179b\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6 \u179f\u17bc\u1798\u178f\u17d2\u179a\u17a1\u1794\u17cb\u1798\u1780\u1791\u17b7\u1789\u178a\u17c4\u1799\u1794\u17d2\u179a\u17be /start_ \U0001f6d2"
+                f"\U0001f4ac <b>\u179f\u17bd\u179f\u17d2\u178f\u17b8! NiMo \u179a\u17b8\u1780\u179a\u17b6\u1799\u1787\u17bd\u1799\u1794\u1784</b> \u2764\ufe0f\n\n"
+                f"\u1785\u17bb\u1785\u179b\u17b8\u1784\u1781\u17b6\u1784\u1780\u17d2\u179a\u17c4\u1798 \u178a\u17be\u1798\u17d2\u1794\u17b8\u1791\u17c6\u1793\u17b6\u1780\u17cb\u1791\u17c6\u1793\u1784\u1795\u17d2\u1791\u17b6\u179b\u17cb\u1787\u17b6\u1798\u17bd\u1799\u17a2\u17d2\u1793\u1780\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6:\n\n"
+                f"\U0001f449 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
+                f"<i>\u1794\u1793\u17d2\u1791\u17b6\u1794\u17cb\u1796\u17b8\u1791\u1791\u17bd\u179b\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6 \u179f\u17bc\u1798\u178f\u17d2\u179a\u17a1\u1794\u17cb\u1798\u1780\u1791\u17b7\u1789\u178a\u17c4\u1799\u1794\u17d2\u179a\u17be /start</i> \U0001f6d2"
             ),
             "end_consult_btn":  "\U0001f51a \u1794\u1789\u17d2\u1785\u1794\u17cb \u2014 \u178f\u17d2\u179a\u17a1\u1794\u17cb\u1791\u17c5\u1798\u17c9\u17ba\u1793\u17bb\u1799",
             "end_consult_msg":  "\u2705 \u1794\u17b6\u1793\u1794\u1789\u17d2\u1785\u1794\u17cb\u17d4 \u17a2\u179a\u1782\u17bb\u178e\u1794\u1784 \u2764\ufe0f\n\n\u1785\u17bb\u1785 /start \u178a\u17be\u1798\u17d2\u1794\u17b8\u1794\u17be\u1780\u1798\u17c9\u17ba\u1793\u17bb\u1799\u17d4",
@@ -936,10 +938,10 @@ CONTENT = {
             "back_cat":         "\u2b05\ufe0f Other questions",
             "unsure_btn":       "\U0001f914 I'm not sure \u2014 need advice",
             "consult_msg": (
-                "\U0001f4ac *Hi! NiMo is happy to help you* \u2764\ufe0f\n\n"
-                "Click the link below to chat directly with our advisor:\n\n"
-                "\U0001f449 [Chat with NiMo Advisor](https://t.me/sovanny68)\n\n"
-                "_After consulting, come back here to place your order with /start_ \U0001f6d2"
+                f"\U0001f4ac <b>Hi! NiMo is happy to help you</b> \u2764\ufe0f\n\n"
+                f"Click the link below to chat directly with our advisor:\n\n"
+                f"\U0001f449 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
+                f"<i>After consulting, come back here to place your order with /start</i> \U0001f6d2"
             ),
             "end_consult_btn":  "\U0001f51a End consultation \u2014 back to menu",
             "end_consult_msg":  "\u2705 Consultation ended. Thank you \u2764\ufe0f\n\nType /start to open the menu again.",
@@ -1142,7 +1144,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["consulting"] = True
         await query.edit_message_text(
             s["consult_msg"],
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=end_consult_keyboard(context)
         )
         user = query.from_user
