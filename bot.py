@@ -987,6 +987,7 @@ def end_consult_keyboard(context):
 # \u2500\u2500\u2500 HANDLERS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
     await update.message.reply_text(
         "\U0001F1F0\U0001F1ED \u1787\u17D2\u179A\u17BE\u179F\u1797\u17B6\u179F\u17B6  |  \U0001F1EC\U0001F1E7 Choose language:",
         reply_markup=lang_keyboard()
@@ -1080,8 +1081,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=end_consult_keyboard(context)
         )
-        if ADMIN_ID:
-            user = query.from_user
+        user = query.from_user
+        if ADMIN_ID and user.id != ADMIN_ID:
             lang = get_lang(context)
             try:
                 await context.bot.send_message(
