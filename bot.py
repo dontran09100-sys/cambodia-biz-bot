@@ -1,5 +1,6 @@
+# -*- coding: utf-8 -*-
 """
-Cambodia Biz Agent \u2014 Bot Khmer + English
+Cambodia Biz Agent — Bot Khmer + English
 FAQ + buy flow + admin support
 Token: @NiMoBizAgent_bot (Railway)
 """
@@ -16,7 +17,7 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# \u2500\u2500\u2500 KHQR GENERATOR \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── KHQR GENERATOR ─────────────────────────────────────────────────────────
 
 def _tlv(tag: str, value: str) -> str:
     return f"{tag}{len(value):02d}{value}"
@@ -52,13 +53,92 @@ def make_aba_qr(amount_usd: float) -> io.BytesIO:
     buf.seek(0)
     return buf
 
-# \u2500\u2500\u2500 CONFIG \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── CONFIG ─────────────────────────────────────────────────────────────────
 import os
 
-TOKEN           = os.environ.get("BOT_TOKEN", "8750588238:AAFUJ3o6iR7Cu92on2HdsvLhKP5pQHs15Bo")
-ADMIN_ID        = int(os.environ.get("ADMIN_ID", "8704923191"))
-APPS_SCRIPT_URL = os.environ.get("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz3OQtNOOOgXmCwbO-sODdFw_TDQd8zRAMwtEbqML1H3pApYywaYeXzr0gcE44OjOOF/exec")
-STAFF_USERNAME  = os.environ.get("STAFF_USERNAME", "sovanny68")
+TOKEN                = os.environ.get("BOT_TOKEN", "8750588238:AAFUJ3o6iR7Cu92on2HdsvLhKP5pQHs15Bo")
+ADMIN_ID             = int(os.environ.get("ADMIN_ID", "8704923191"))
+APPS_SCRIPT_URL      = os.environ.get("APPS_SCRIPT_URL", "https://script.google.com/macros/s/AKfycbz3OQtNOOOgXmCwbO-sODdFw_TDQd8zRAMwtEbqML1H3pApYywaYeXzr0gcE44OjOOF/exec")
+STAFF_USERNAME       = os.environ.get("STAFF_USERNAME", "sovanny68")
+ANTHROPIC_API_KEY    = os.environ.get("ANTHROPIC_API_KEY", "")
+DONE_MONEY_GROUP_ID  = int(os.environ.get("DONE_MONEY_GROUP_ID", "0"))
+
+# APV storage: {apv_code: {amount, name, time}}
+_apv_store: dict = {}
+
+import re
+import base64
+import time
+
+def _parse_payway_apv(text: str) -> dict | None:
+    """Parse PayWay message: extract amount, payer name, APV."""
+    apv_match    = re.search(r'APV[:\s]+(\d{4,8})', text, re.IGNORECASE)
+    amount_match = re.search(r'\$([0-9.]+)\s*paid', text, re.IGNORECASE)
+    name_match   = re.search(r'paid by\s+([A-Z][A-Z\s]+?)\s+\(', text)
+    if not apv_match:
+        return None
+    return {
+        "apv":    apv_match.group(1),
+        "amount": float(amount_match.group(1)) if amount_match else 0,
+        "payer":  name_match.group(1).strip() if name_match else "Unknown"
+    }
+
+async def _ocr_bill_image(photo_bytes: bytes) -> str | None:
+    """Use Claude Vision to extract APV from ABA bill screenshot."""
+    if not ANTHROPIC_API_KEY:
+        return None
+    def _call():
+        import urllib.request as _ur
+        body = _json.dumps({
+            "model": "claude-haiku-4-5-20251001",
+            "max_tokens": 100,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": base64.b64encode(photo_bytes).decode()
+                    }},
+                    {"type": "text", "text": "This is an ABA bank payment confirmation. Extract ONLY the APV number (4-8 digits). Reply with just the number, nothing else."}
+                ]
+            }]
+        }).encode()
+        req = _ur.Request(
+            "https://api.anthropic.com/v1/messages", data=body,
+            headers={"Content-Type": "application/json",
+                     "x-api-key": ANTHROPIC_API_KEY,
+                     "anthropic-version": "2023-06-01"}, method="POST"
+        )
+        try:
+            with _ur.urlopen(req, timeout=15) as r:
+                result = _json.loads(r.read())
+                text = result["content"][0]["text"].strip()
+                m = re.search(r'\d{4,8}', text)
+                return m.group(0) if m else None
+        except Exception as e:
+            logging.error(f"OCR error: {e}")
+            return None
+    return await asyncio.get_event_loop().run_in_executor(None, _call)
+
+async def handle_group_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Listen to DONE Money group for PayWay payment notifications."""
+    if not DONE_MONEY_GROUP_ID:
+        return
+    if update.effective_chat.id != DONE_MONEY_GROUP_ID:
+        return
+    text = (update.message.text or update.message.caption or "")
+    parsed = _parse_payway_apv(text)
+    if not parsed:
+        return
+    apv = parsed["apv"]
+    _apv_store[apv] = {**parsed, "ts": time.time()}
+    # Purge entries older than 2 hours
+    now = time.time()
+    for k in list(_apv_store.keys()):
+        if now - _apv_store[k].get("ts", 0) > 7200:
+            del _apv_store[k]
+    logging.info(f"PayWay APV captured: {apv}  amount=${parsed['amount']}  payer={parsed['payer']}")
 
 async def _post_to_sheet(data: dict):
     def _send():
@@ -75,467 +155,467 @@ async def _post_to_sheet(data: dict):
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 
-# \u2500\u2500\u2500 PAYMENT INFO \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── PAYMENT INFO ────────────────────────────────────────────────────────────
 
 BANK_INFO = {
-    "basic": {"label": "Basic", "price_usd": "$97",  "price_riel": "\u2248 400,000 Riel"},
-    "pro":   {"label": "Pro",   "price_usd": "$297", "price_riel": "\u2248 1,200,000 Riel"},
-    "vip":   {"label": "VIP",   "price_usd": "$597", "price_riel": "\u2248 2,400,000 Riel"},
+    "basic": {"label": "Basic", "price_usd": "$97",  "price_riel": "≈ 400,000 Riel"},
+    "pro":   {"label": "Pro",   "price_usd": "$297", "price_riel": "≈ 1,200,000 Riel"},
+    "vip":   {"label": "VIP",   "price_usd": "$597", "price_riel": "≈ 2,400,000 Riel"},
 }
 
 BANK_DETAILS = {
     "km": (
-        "\U0001f4b3 *\u1796\u17d0\u178f\u17cc\u1798\u17b6\u1793\u1780\u17b6\u179a\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb*\n\n"
-        "\U0001f3e6 *ABA Bank*\n"
-        "\u179b\u17c1\u1781\u1782\u178e\u1793\u17b8: `000 123 456`\n"
-        "\u1788\u17d2\u1798\u17c4\u17c7: NIMO TEAM\n\n"
-        "\U0001f4f1 *Wing Money*\n"
-        "\u179b\u17c1\u1781\u1791\u17bc\u179a\u179f\u17d0\u1796\u17d2\u1791: `012 345 678`\n"
-        "\u1788\u17d2\u1798\u17c4\u17c7: NIMO TEAM\n\n"
-        "\u26a0\ufe0f *\u179f\u1798\u17d2\u1782\u17b6\u179b\u17cb:* \u179f\u17bc\u1798\u179f\u179a\u179f\u17c1\u179a\u179b\u17c1\u1781\u1780\u17bc\u178a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789 NiMo \u1795\u17d2\u1789\u17be\u17a2\u17c4\u1799 \u1780\u17d2\u1793\u17bb\u1784\u1780\u17b6\u179a\u1795\u17d2\u1791\u17c1\u179a\u17d4"
+        "💳 *ព័ត៌មានការផ្ទេរប្រាក់*\n\n"
+        "🏦 *ABA Bank*\n"
+        "លេខគណនី: `000 123 456`\n"
+        "ឈ្មោះ: NIMO TEAM\n\n"
+        "📱 *Wing Money*\n"
+        "លេខទូរស័ព្ទ: `012 345 678`\n"
+        "ឈ្មោះ: NIMO TEAM\n\n"
+        "⚠️ *សម្គាល់:* សូមសរសេរលេខកូដបញ្ជាទិញ NiMo ផ្ញើអោយ ក្នុងការផ្ទេរ។"
     ),
     "en": (
-        "\U0001f4b3 *Payment Details*\n\n"
-        "\U0001f3e6 *ABA Bank*\n"
+        "💳 *Payment Details*\n\n"
+        "🏦 *ABA Bank*\n"
         "Account: `000 123 456`\n"
         "Name: NIMO TEAM\n\n"
-        "\U0001f4f1 *Wing Money*\n"
+        "📱 *Wing Money*\n"
         "Phone: `012 345 678`\n"
         "Name: NIMO TEAM\n\n"
-        "\u26a0\ufe0f *Note:* Include the order code NiMo provides in the transfer remark."
+        "⚠️ *Note:* Include the order code NiMo provides in the transfer remark."
     ),
 }
 
-# \u2500\u2500\u2500 CONTENT \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── CONTENT ─────────────────────────────────────────────────────────────────
 
 CONTENT = {
     "km": {
         "faq": {
             "q_nimo": {
-                "label": "\U0001f464 NiMo \u1787\u17b6\u1793\u179a\u178e\u17b6?",
+                "label": "👤 NiMo ជានរណា?",
                 "answer": (
-                    "\U0001f464 *NiMo \u1787\u17b6\u1793\u179a\u178e\u17b6?*\n\n"
-                    "NiMo \u1794\u17b6\u1793\u1780\u17be\u178f\u1785\u17c1\u1789\u1796\u17b8\u1794\u17c6\u178e\u1784\u1794\u17d2\u179a\u17b6\u1790\u17d2\u1793\u17b6\u1798\u17bd\u1799:\n\n"
-                    "_\u1785\u1784\u17cb\u1785\u17c6\u178e\u17bc\u179b\u179a\u17bd\u1798\u17a2\u17d2\u179c\u17b8\u1798\u17bd\u1799\u1798\u17b6\u1793\u17a2\u178f\u17d2\u1790\u1793\u17d0\u1799 \u178a\u179b\u17cb\u179f\u17a0\u1782\u1798\u1793\u17cd\u17a2\u17b6\u1787\u17b8\u179c\u1780\u1798\u17d2\u1798\u1793\u17c5\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6\u17d4_\n\n"
-                    "\u1781\u178e\u17c8\u1794\u17d2\u179a\u1791\u17c1\u179f\u1787\u17b7\u178f\u1781\u17b6\u1784\u1794\u17d2\u179a\u17be AI \u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7\u178f\u17b6\u17c6\u1784\u1796\u17b8\u1799\u17bc\u179a \u2014 "
-                    "\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6\u1787\u17b6\u1785\u17d2\u179a\u17be\u1793\u1793\u17c5\u1792\u17d2\u179c\u17be\u1780\u17b6\u179a\u178a\u17c4\u1799\u178a\u17c3\u17d4 "
-                    "\u1798\u17b7\u1793\u1798\u17c2\u1793\u1798\u17b7\u1793\u1785\u1784\u17cb\u1794\u17d2\u178a\u17bc\u179a \u2014 \u1782\u17d2\u179a\u17b6\u1793\u17cb\u178f\u17c2\u1798\u17b7\u1793\u1791\u17b6\u1793\u17cb\u1798\u17b6\u1793\u17a7\u1794\u1780\u179a\u178e\u17cd\u179f\u1798\u179f\u17d2\u179a\u1794\u17d4\n\n"
-                    "NiMo \u1780\u17be\u178f\u17a1\u17be\u1784\u178a\u17be\u1798\u17d2\u1794\u17b8\u1794\u17c6\u1796\u17c1\u1789\u1785\u1793\u17d2\u179b\u17c4\u17c7\u1793\u17c4\u17c7 \u2014 "
-                    "\u1787\u17bd\u1799\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1781\u17d2\u1798\u17c2\u179a access AI \u178a\u17c4\u1799\u1784\u17b6\u1799 \u1787\u17b6\u1797\u17b6\u179f\u17b6\u179a\u1794\u179f\u17cb\u1781\u17d2\u179b\u17bd\u1793\u17d4"
+                    "👤 *NiMo ជានរណា?*\n\n"
+                    "NiMo បានកើតចេញពីបំណងប្រាថ្នាមួយ:\n\n"
+                    "_ចង់ចំណូលរួមអ្វីមួយមានអត្ថន័យ ដល់សហគមន៍អាជីវកម្មនៅកម្ពុជា។_\n\n"
+                    "ខណៈប្រទេសជិតខាងប្រើ AI ស្វ័យប្រវត្តិតាំងពីយូរ — "
+                    "ម្ចាស់ហាងកម្ពុជាជាច្រើននៅធ្វើការដោយដៃ។ "
+                    "មិនមែនមិនចង់ប្ដូរ — គ្រាន់តែមិនទាន់មានឧបករណ៍សមស្រប។\n\n"
+                    "NiMo កើតឡើងដើម្បីបំពេញចន្លោះនោះ — "
+                    "ជួយម្ចាស់ហាងខ្មែរ access AI ដោយងាយ ជាភាសារបស់ខ្លួន។"
                 ),
             },
             "q_system": {
-                "label": "\U0001f4ac \u1781\u17d2\u1789\u17bb\u17c6\u1798\u17b7\u1793\u1791\u17b6\u1793\u17cb\u1799\u179b\u17cb\u1785\u17d2\u1794\u17b6\u179f\u17cb\u17a2\u17c6\u1796\u17b8\u1794\u17d2\u179a\u1796\u17d0\u1793\u17d2\u1792\u1793\u17c1\u17c7",
+                "label": "💬 ខ្ញុំមិនទាន់យល់ច្បាស់អំពីប្រព័ន្ធនេះ",
                 "answer": (
-                    "\U0001f4ac *\u1794\u17d2\u179a\u1796\u17d0\u1793\u17d2\u1792 Cambodia Biz Agent \u178a\u17c6\u178e\u17be\u179a\u1780\u17b6\u179a\u1799\u17c9\u17b6\u1784\u178a\u17bc\u1785\u1798\u17d2\u178f\u17c1\u1785?*\n\n"
-                    "\u1799\u179b\u17cb\u17b1\u17d2\u1799\u179f\u17b6\u1798\u1789\u17d2\u1789: \u1794\u1784 \u1798\u17b6\u1793 *\u1794\u17bb\u1782\u17d2\u1782\u179b\u17b7\u1780 AI \u1785\u17c6\u1793\u17bd\u1793 5 \u1793\u17b6\u1780\u17cb* \u2014 \u1798\u17d2\u1793\u17b6\u1780\u17cb\u1792\u17d2\u179c\u17be\u1780\u17b6\u179a\u1784\u17b6\u179a 1:\n\n"
-                    "\U0001f50d \u179f\u17d2\u179a\u17b6\u179c\u1787\u17d2\u179a\u17b6\u179c\u1791\u17b8\u1795\u17d2\u179f\u17b6\u179a \u1793\u17b7\u1784\u1782\u17bc\u1794\u17d2\u179a\u1787\u17c2\u1784\n"
-                    "\U0001f4e3 \u1794\u1784\u17d2\u1780\u17be\u178f\u1798\u17b6\u178f\u17b7\u1780\u17b6 FB/TikTok/Instagram\n"
-                    "\U0001f4b0 \u179f\u179a\u179f\u17c1\u179a\u1791\u17c6\u1796\u17d0\u179a\u179b\u1780\u17cb \u1793\u17b7\u1784\u1794\u17b7\u1791\u1780\u17b6\u179a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789\n"
-                    "\U0001f4e6 \u1791\u1791\u17bd\u179b\u1780\u17b6\u179a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789 \u1793\u17b7\u1784\u1787\u17bc\u1793\u178a\u17c6\u178e\u17b9\u1784\u178a\u17c4\u1799\u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7\n"
-                    "\U0001f4ca \u179a\u1794\u17b6\u1799\u1780\u17b6\u179a\u178e\u17cd\u1785\u17c6\u178e\u17bc\u179b \u1793\u17b7\u1784\u1794\u1784\u17d2\u1780\u17be\u1793\u1794\u17d2\u179a\u179f\u17b7\u1791\u17d2\u1792\u1797\u17b6\u1796\n\n"
-                    "\u1794\u1784\u1794\u1789\u17d2\u1787\u17b6\u1787\u17b6\u1797\u17b6\u179f\u17b6\u1781\u17d2\u1798\u17c2\u179a \u2014 AI \u1792\u17d2\u179c\u17be\u1780\u17b6\u179a\u1797\u17d2\u179b\u17b6\u1798\u17d7\u17d4\n\n"
-                    "\u1798\u17b7\u1793\u1785\u17b6\u17c6\u1794\u17b6\u1785\u17cb\u1785\u17c1\u17c7\u179f\u179a\u179f\u17c1\u179a\u1780\u17bc\u178a\u17d4 \U0001f680"
+                    "💬 *ប្រព័ន្ធ Cambodia Biz Agent ដំណើរការយ៉ាងដូចម្តេច?*\n\n"
+                    "យល់ឱ្យសាមញ្ញ: បង មាន *បុគ្គលិក AI ចំនួន 5 នាក់* — ម្នាក់ធ្វើការងារ 1:\n\n"
+                    "🔍 ស្រាវជ្រាវទីផ្សារ និងគូប្រជែង\n"
+                    "📣 បង្កើតមាតិកា FB/TikTok/Instagram\n"
+                    "💰 សរសេរទំព័រលក់ និងបិទការបញ្ជាទិញ\n"
+                    "📦 ទទួលការបញ្ជាទិញ និងជូនដំណឹងដោយស្វ័យប្រវត្តិ\n"
+                    "📊 របាយការណ៍ចំណូល និងបង្កើនប្រសិទ្ធភាព\n\n"
+                    "បងបញ្ជាជាភាសាខ្មែរ — AI ធ្វើការភ្លាមៗ។\n\n"
+                    "មិនចាំបាច់ចេះសរសេរកូដ។ 🚀"
                 ),
             },
             "q_different": {
-                "label": "\U0001f19a Cambodia Biz Agent \u1781\u17bb\u179f\u1796\u17b8 Agent \u178a\u1791\u17c3?",
+                "label": "🆚 Cambodia Biz Agent ខុសពី Agent ដទៃ?",
                 "answer": (
-                    "\U0001f19a *Cambodia Biz Agent \u1781\u17bb\u179f\u1796\u17b8 Agent \u178a\u1791\u17c3\u178a\u17bc\u1785\u1798\u17d2\u178a\u17c1\u1785?*\n\n"
-                    "AI Agent \u1787\u17b6\u1785\u17d2\u179a\u17be\u1793\u178f\u17d2\u179a\u17bc\u179c\u1794\u17b6\u1793\u179f\u17b6\u1784\u179f\u1784\u17cb\u179f\u1798\u17d2\u179a\u17b6\u1794\u17cb\u1791\u17b8\u1795\u17d2\u179f\u17b6\u179a\u1781\u17b6\u1784\u179b\u17b7\u1785 \u2014 "
-                    "\u1797\u17b6\u179f\u17b6\u17a2\u1784\u17cb\u1782\u17d2\u179b\u17c1\u179f Stripe payments \u179f\u17d2\u1791\u17b8\u179b US/EU \u17d4\n\n"
-                    "*Cambodia Biz Agent \u1781\u17bb\u179f: \u179f\u17b6\u1784\u179f\u1784\u17cb\u1787\u17b6\u1796\u17b7\u179f\u17c1\u179f\u179f\u1798\u17d2\u179a\u17b6\u1794\u17cb\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6\u17d4*\n\n"
-                    "\U0001f1f0\U0001f1ed *\u1797\u17b6\u179f\u17b6:* \u1781\u17d2\u1798\u17c2\u179a\u1792\u1798\u17d2\u1798\u1787\u17b6\u178f\u17b7 \u2014 \u1798\u17b7\u1793\u1798\u17c2\u1793 google translate\n\n"
-                    "\U0001f4b3 *\u1780\u17b6\u179a\u1791\u17bc\u1791\u17b6\u178f\u17cb:* ABA Pay, Wing Money, Bakong KHQR \u2014 \u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u178f\u17a2\u1793\u17d2\u178f\u179a\u1787\u17b6\u178f\u17b7\n\n"
-                    "\U0001f4f1 *\u179c\u17c1\u1791\u17b7\u1780\u17b6:* Facebook, TikTok, Telegram \u2014 \u178f\u17d2\u179a\u17bc\u179c\u1787\u17b6\u1780\u1793\u17d2\u179b\u17c2\u1784\u1781\u17d2\u1798\u17c2\u179a\u1791\u17b7\u1789\n\n"
-                    "\U0001f91d *\u1787\u17c6\u1793\u17bd\u1799:* NiMo \u1793\u17c5\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6 \u1799\u179b\u17cb\u1791\u17b8\u1795\u17d2\u179f\u17b6\u179a \u1787\u17bd\u1799\u1795\u17d2\u1791\u17b6\u179b\u17cb\n\n"
-                    "\u179f\u17b6\u1784\u179f\u1784\u17cb\u1796\u17b8\u1797\u17b6\u1796\u1787\u17b6\u1780\u17cb\u179f\u17d2\u178a\u17c2\u1784\u1793\u17c3\u1791\u17b8\u1795\u17d2\u179f\u17b6\u179a\u1793\u17c1\u17c7 \u2014 \u1798\u17b7\u1793\u1798\u17c2\u1793 copy \u1796\u17b8\u1780\u1793\u17d2\u179b\u17c2\u1784\u1795\u17d2\u179f\u17c1\u1784\u17d4"
+                    "🆚 *Cambodia Biz Agent ខុសពី Agent ដទៃដូចម្ដេច?*\n\n"
+                    "AI Agent ជាច្រើនត្រូវបានសាងសង់សម្រាប់ទីផ្សារខាងលិច — "
+                    "ភាសាអង់គ្លេស Stripe payments ស្ទីល US/EU ។\n\n"
+                    "*Cambodia Biz Agent ខុស: សាងសង់ជាពិសេសសម្រាប់ម្ចាស់ហាងកម្ពុជា។*\n\n"
+                    "🇰🇭 *ភាសា:* ខ្មែរធម្មជាតិ — មិនមែន google translate\n\n"
+                    "💳 *ការទូទាត់:* ABA Pay, Wing Money, Bakong KHQR — គ្មានកាតអន្តរជាតិ\n\n"
+                    "📱 *វេទិកា:* Facebook, TikTok, Telegram — ត្រូវជាកន្លែងខ្មែរទិញ\n\n"
+                    "🤝 *ជំនួយ:* NiMo នៅកម្ពុជា យល់ទីផ្សារ ជួយផ្ទាល់\n\n"
+                    "សាងសង់ពីភាពជាក់ស្ដែងនៃទីផ្សារនេះ — មិនមែន copy ពីកន្លែងផ្សេង។"
                 ),
             },
             "q_save": {
-                "label": "\U0001f4b0 \u1781\u17d2\u1789\u17bb\u17c6\u1793\u17b9\u1784\u179f\u1793\u17d2\u179f\u17c6\u1794\u17b6\u1793\u17a2\u17d2\u179c\u17b8?",
+                "label": "💰 ខ្ញុំនឹងសន្សំបានអ្វី?",
                 "answer": (
-                    "\U0001f4b0 *\u1794\u17d2\u179a\u1796\u17d0\u1793\u17d2\u1792\u1793\u17c1\u17c7\u1787\u17bd\u1799\u1781\u17d2\u1789\u17bb\u17c6\u179f\u1793\u17d2\u179f\u17c6\u1794\u17b6\u1793\u17a2\u17d2\u179c\u17b8?*\n\n"
-                    "\u17a2\u17d2\u179c\u17b8\u178a\u17c2\u179b\u1794\u1784\u179f\u1793\u17d2\u179f\u17c6\u1794\u17b6\u1793\u1785\u17d2\u179a\u17be\u1793\u1794\u17c6\u1795\u17bb\u178f \u2014 \u1798\u17b7\u1793\u1798\u17c2\u1793\u179b\u17bb\u1799\u17d4 \u1796\u17c1\u179b\u179c\u17c1\u179b\u17b6\u17d4\n\n"
-                    "\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1787\u17b6\u1798\u1792\u17d2\u1799\u1798\u1798\u17b6\u1793 3 \u1798\u17c9\u17c4\u1784/\u1790\u17d2\u1784\u17c3 \u1785\u17c6\u178e\u17b6\u1799\u179b\u17be\u1780\u17b6\u179a\u1784\u17b6\u179a\u178a\u178a\u17c2\u179b\u17d7:\n"
-                    "\u179f\u179a\u179f\u17c1\u179a caption \u1786\u17d2\u179b\u17be\u1799\u179f\u17b6\u179a \u1794\u17d2\u179a\u1780\u17b6\u179f \u17d4\n\n"
-                    "*3 \u1798\u17c9\u17c4\u1784 \xd7 30 \u1790\u17d2\u1784\u17c3 = 90 \u1798\u17c9\u17c4\u1784/\u1781\u17c2* \u2014 Cambodia Biz Agent \u1792\u17d2\u179c\u17be\u1787\u17c6\u1793\u17bd\u179f\u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "\u1785\u17c6\u1796\u17c4\u17c7 cost:\n\n"
-                    "\U0001f50d \u179f\u17d2\u179a\u17b6\u179c\u1787\u17d2\u179a\u17b6\u179c: $100\u2013200/\u178a\u1784\n"
-                    "\U0001f4e3 Content: $50\u2013150/\u1781\u17c2\n"
-                    "\U0001f4ac Inbox: $200\u2013300/\u1781\u17c2\n"
-                    "\U0001f4e6 \u178a\u17c4\u17c7\u179f\u17d2\u179a\u17b6\u1799\u1780\u17b6\u179a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789: $150\u2013250/\u1781\u17c2\n"
-                    "\U0001f4ca \u179a\u1794\u17b6\u1799\u1780\u17b6\u179a\u178e\u17cd: $100\u2013200/\u1781\u17c2\n\n"
-                    "*\u1787\u17bd\u179b\u1798\u1793\u17bb\u179f\u17d2\u179f: ~$700\u20131,200/\u1781\u17c2*\n\n"
-                    "Cambodia Biz Agent: \u1798\u17d2\u178a\u1784\u1794\u17c9\u17bb\u178e\u17d2\u178e\u17c4\u17c7 \U0001f7e6$97 \xb7 \u2b50$297 \xb7 \U0001f7e1$597\n\n"
-                    "\u1786\u17d2\u1793\u17b6\u17c6\u178a\u17c6\u1794\u17bc\u1784 \u179f\u1793\u17d2\u179f\u17c6 *$8,000\u201314,000* \U0001f4b0"
+                    "💰 *ប្រព័ន្ធនេះជួយខ្ញុំសន្សំបានអ្វី?*\n\n"
+                    "អ្វីដែលបងសន្សំបានច្រើនបំផុត — មិនមែនលុយ។ ពេលវេលា។\n\n"
+                    "ម្ចាស់ហាងជាមធ្យមមាន 3 ម៉ោង/ថ្ងៃ ចំណាយលើការងារដដែលៗ:\n"
+                    "សរសេរ caption ឆ្លើយសារ ប្រកាស ។\n\n"
+                    "*3 ម៉ោង × 30 ថ្ងៃ = 90 ម៉ោង/ខែ* — Cambodia Biz Agent ធ្វើជំនួស។\n\n"
+                    "─────────\n\n"
+                    "ចំពោះ cost:\n\n"
+                    "🔍 ស្រាវជ្រាវ: $100–200/ដង\n"
+                    "📣 Content: $50–150/ខែ\n"
+                    "💬 Inbox: $200–300/ខែ\n"
+                    "📦 ដោះស្រាយការបញ្ជាទិញ: $150–250/ខែ\n"
+                    "📊 របាយការណ៍: $100–200/ខែ\n\n"
+                    "*ជួលមនុស្ស: ~$700–1,200/ខែ*\n\n"
+                    "Cambodia Biz Agent: ម្ដងប៉ុណ្ណោះ 🟦$97 · ⭐$297 · 🟡$597\n\n"
+                    "ឆ្នាំដំបូង សន្សំ *$8,000–14,000* 💰"
                 ),
             },
             "q_location": {
-                "label": "\U0001f3e2 \u1780\u17b6\u179a\u17b7\u1799\u17b6\u179b\u17d0\u1799 NiMo \u1793\u17c5\u1791\u17b8\u178e\u17b6?",
+                "label": "🏢 ការិយាល័យ NiMo នៅទីណា?",
                 "answer": (
-                    "\U0001f3e2 *\u1780\u17b6\u179a\u17b7\u1799\u17b6\u179b\u17d0\u1799 NiMo \u1793\u17c5\u1791\u17b8\u178e\u17b6?*\n\n"
-                    "NiMo \u178a\u17c6\u178e\u17be\u179a\u1780\u17b6\u179a online \u1791\u17b6\u17c6\u1784\u179f\u17d2\u179a\u17bb\u1784 \u2014 \u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a\u17b7\u1799\u17b6\u179b\u17d0\u1799 physical \u17d4 "
-                    "\u178a\u17bc\u1785\u1796\u17c1\u179b\u1794\u1784\u1791\u17b7\u1789 app \u17ac course online \u2014 "
-                    "\u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a\u17b7\u1799\u17b6\u179b\u17d0\u1799 \u1780\u17cf\u1794\u17d2\u179a\u17be\u1794\u17b6\u1793\u1792\u1798\u17d2\u1798\u178f\u17b6\u17d4\n\n"
-                    "\u17a2\u17d2\u179c\u17b8\u179f\u17c6\u1781\u17b6\u1793\u17cb: NiMo \u1792\u17b6\u1793\u17b6 *30 \u1790\u17d2\u1784\u17c3 \u1794\u1784\u17d2\u179c\u17b7\u179b\u179b\u17bb\u1799 100%* "
-                    "\u1794\u17d2\u179a\u179f\u17b7\u1793\u1794\u17be\u1794\u1784\u1798\u17b7\u1793\u1796\u17c1\u1789\u1785\u17b7\u178f\u17d2\u178f\u17d4 \u2764\ufe0f"
+                    "🏢 *ការិយាល័យ NiMo នៅទីណា?*\n\n"
+                    "NiMo ដំណើរការ online ទាំងស្រុង — គ្មានការិយាល័យ physical ។ "
+                    "ដូចពេលបងទិញ app ឬ course online — "
+                    "គ្មានការិយាល័យ ក៏ប្រើបានធម្មតា។\n\n"
+                    "អ្វីសំខាន់: NiMo ធានា *30 ថ្ងៃ បង្វិលលុយ 100%* "
+                    "ប្រសិនបើបងមិនពេញចិត្ត។ ❤️"
                 ),
             },
             "q_price": {
-                "label": "\U0001f4b5 Cambodia Biz Agent \u178f\u1798\u17d2\u179b\u17c3\u1794\u17c9\u17bb\u1793\u17d2\u1798\u17b6\u1793?",
+                "label": "💵 Cambodia Biz Agent តម្លៃប៉ុន្មាន?",
                 "answer": (
-                    "\U0001f4b5 *Cambodia Biz Agent \u178f\u1798\u17d2\u179b\u17c3\u1794\u17c9\u17bb\u1793\u17d2\u1798\u17b6\u1793? \u1798\u17b6\u1793\u1790\u17d2\u179b\u17c3/\u1781\u17c2?*\n\n"
-                    "\u1791\u17b7\u1789\u1798\u17d2\u178a\u1784 \u2014 \u1794\u17d2\u179a\u17be\u1787\u17b6\u179a\u17c0\u1784\u179a\u17a0\u17bc\u178f\u17d4 \u1798\u17b6\u1793 3 \u1780\u1789\u17d2\u1785\u1794\u17cb:\n\n"
-                    "\U0001f7e6 *Basic $97* (\u2248 400,000 Riel)\n"
-                    "\u179f\u17b6\u1780\u179b\u17d2\u1794\u1784 \u2014 \u17a0\u17b6\u1793\u17b7\u1797\u17d0\u1799\u178f\u17b7\u1785\u1794\u17c6\u1795\u17bb\u178f\n\n"
-                    "\u2b50 *Pro $297* (\u2248 1,200,000 Riel)\n"
-                    "\u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7 24/7\n\n"
-                    "\U0001f7e1 *VIP $597* (\u2248 2,400,000 Riel)\n"
-                    "NiMo \u178a\u17c6\u17a1\u17be\u1784\u1787\u17b6\u1798\u17bd\u1799\u1794\u1784 Zoom \u2014 \u1785\u1794\u17cb\u1794\u17d2\u179a\u17be\u1797\u17d2\u179b\u17b6\u1798\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "\u1790\u17d2\u179b\u17c3\u1794\u17d2\u179a\u1785\u17b6\u17c6\u1781\u17c2\u178f\u17c2\u1798\u17bd\u1799: Claude Pro ~$20.\n\n"
-                    "*\u1782\u17d2\u1798\u17b6\u1793\u1790\u17d2\u179b\u17c3\u179b\u17b6\u1780\u17cb\u179f\u17d2\u1784\u17b6\u178f\u17cb \u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a renew \u17d4*"
+                    "💵 *Cambodia Biz Agent តម្លៃប៉ុន្មាន? មានថ្លៃ/ខែ?*\n\n"
+                    "ទិញម្ដង — ប្រើជារៀងរហូត។ មាន 3 កញ្ចប់:\n\n"
+                    "🟦 *Basic $97* (≈ 400,000 Riel)\n"
+                    "សាកល្បង — ហានិភ័យតិចបំផុត\n\n"
+                    "⭐ *Pro $297* (≈ 1,200,000 Riel)\n"
+                    "ស្វ័យប្រវត្តិ 24/7\n\n"
+                    "🟡 *VIP $597* (≈ 2,400,000 Riel)\n"
+                    "NiMo ដំឡើងជាមួយបង Zoom — ចប់ប្រើភ្លាម\n\n"
+                    "─────────\n\n"
+                    "ថ្លៃប្រចាំខែតែមួយ: Claude Pro ~$20.\n\n"
+                    "*គ្មានថ្លៃលាក់ស្ងាត់ គ្មានការ renew ។*"
                 ),
             },
             "q_which_plan": {
-                "label": "\U0001f914 \u1781\u17d2\u1789\u17bb\u17c6\u1798\u17b7\u1793\u178a\u17b9\u1784\u1790\u17b6\u1780\u1789\u17d2\u1785\u1794\u17cb\u178e\u17b6\u179f\u17b6\u1780\u179f\u1798",
+                "label": "🤔 ខ្ញុំមិនដឹងថាកញ្ចប់ណាសាកសម",
                 "answer": (
-                    "\U0001f914 *\u1780\u1789\u17d2\u1785\u1794\u17cb\u178e\u17b6\u179f\u17b6\u1780\u179f\u1798\u1787\u17b6\u1798\u17bd\u1799\u17a0\u17b6\u1784\u179a\u1794\u179f\u17cb\u1794\u1784?*\n\n"
-                    "\U0001f7e6 *Basic $97* \u2014 \u1791\u17be\u1794\u179f\u17d2\u1782\u17b6\u179b\u17cb AI \u1785\u1784\u17cb\u179f\u17b6\u1780\u179b\u17d2\u1794\u1784\u1798\u17bb\u1793\n"
-                    "\u2192 \u1794\u17bb\u1782\u17d2\u1782\u179b\u17b7\u1780 AI 5 \u1793\u17b6\u1780\u17cb + \u1780\u17b6\u179a\u178e\u17c2\u1793\u17b6\u17c6\u1787\u17b6\u1797\u17b6\u179f\u17b6\u1781\u17d2\u1798\u17c2\u179a + \u1780\u17b6\u179a\u1782\u17b6\u17c6\u1791\u17d2\u179a 30 \u1790\u17d2\u1784\u17c3\n\n"
-                    "\u2b50 *Pro $297* \u2014 \u17a0\u17b6\u1784\u178a\u17c6\u178e\u17be\u179a\u1780\u17b6\u179a \u1785\u1784\u17cb\u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7 24/7\n"
-                    "\u2192 Chatbot \u1786\u17d2\u179b\u17be\u1799 + \u1794\u17d2\u179a\u1780\u17b6\u179f\u178a\u17c4\u1799\u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7 + \u1791\u1791\u17bd\u179b booking\n\n"
-                    "\U0001f7e1 *VIP $597* \u2014 \u1798\u17b7\u1793\u1785\u1784\u17cb\u178a\u17c6\u17a1\u17be\u1784\u1781\u17d2\u179b\u17bd\u1793\u17af\u1784 NiMo \u1792\u17d2\u179c\u17be\u1787\u17c6\u1793\u17bd\u179f\n"
-                    "\u2192 \u178a\u17c6\u17a1\u17be\u1784\u179a\u17bd\u1785 \u1794\u17d2\u179a\u17be\u1794\u17b6\u1793\u1797\u17d2\u179b\u17b6\u1798 \u1780\u17b6\u179a\u1782\u17b6\u17c6\u1791\u17d2\u179a 90 \u1790\u17d2\u1784\u17c3\n\n"
-                    "\u1798\u17b7\u1793\u1794\u17d2\u179a\u17b6\u1780\u178a? \u1794\u17d2\u179a\u17b6\u1794\u17cb NiMo \u17a2\u17c6\u1796\u17b8\u17a0\u17b6\u1784\u179a\u1794\u179f\u17cb\u1794\u1784 \u2014 \u1799\u17be\u1784\u178e\u17c2\u1793\u17b6\u17c6\u1780\u1789\u17d2\u1785\u1794\u17cb\u178f\u17d2\u179a\u17b9\u1798\u178f\u17d2\u179a\u17bc\u179c \U0001f447"
+                    "🤔 *កញ្ចប់ណាសាកសមជាមួយហាងរបស់បង?*\n\n"
+                    "🟦 *Basic $97* — ទើបស្គាល់ AI ចង់សាកល្បងមុន\n"
+                    "→ បុគ្គលិក AI 5 នាក់ + ការណែនាំជាភាសាខ្មែរ + ការគាំទ្រ 30 ថ្ងៃ\n\n"
+                    "⭐ *Pro $297* — ហាងដំណើរការ ចង់ស្វ័យប្រវត្តិ 24/7\n"
+                    "→ Chatbot ឆ្លើយ + ប្រកាសដោយស្វ័យប្រវត្តិ + ទទួល booking\n\n"
+                    "🟡 *VIP $597* — មិនចង់ដំឡើងខ្លួនឯង NiMo ធ្វើជំនួស\n"
+                    "→ ដំឡើងរួច ប្រើបានភ្លាម ការគាំទ្រ 90 ថ្ងៃ\n\n"
+                    "មិនប្រាកដ? ប្រាប់ NiMo អំពីហាងរបស់បង — យើងណែនាំកញ្ចប់ត្រឹមត្រូវ 👇"
                 ),
             },
             "q_worth": {
-                "label": "\U0001f48e $297 \u1798\u17b6\u1793\u178f\u1798\u17d2\u179b\u17c3\u1785\u17c6\u178e\u17b6\u1799\u1791\u17c1?",
+                "label": "💎 $297 មានតម្លៃចំណាយទេ?",
                 "answer": (
-                    "\U0001f48e *$297 \u1798\u17b6\u1793\u178f\u1798\u17d2\u179b\u17c3\u1785\u17c6\u178e\u17b6\u1799\u1791\u17c1?*\n\n"
-                    "\u1785\u17bc\u179a\u17b1\u17d2\u1799\u179b\u17c1\u1781\u178f\u1794\u178f\u17c2\u17d4\n\n"
-                    "*\u1794\u17bb\u1782\u17d2\u1782\u179b\u17b7\u1780 inbox \u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6:* $200\u2013300/\u1781\u17c2\n"
-                    "\u2192 8 \u1798\u17c9\u17c4\u1784/\u1790\u17d2\u1784\u17c3\u17d4 \u1788\u1794\u17cb\u1788\u179a\u17d4 \u1788\u17ba = \u1794\u1793\u17d2\u1790\u1799 productivity \u17d4\n\n"
-                    "*Cambodia Biz Agent Pro $297* \u2014 \u1798\u17d2\u178a\u1784\u1794\u17c9\u17bb\u178e\u17d2\u178e\u17c4\u17c7\n"
-                    "\u2192 24/7 \u17d4 \u1798\u17b7\u1793\u1788\u1794\u17cb \u17d4 \u1798\u17b7\u1793\u179f\u17bb\u17c6\u17a1\u17be\u1784\u1794\u17d2\u179a\u17b6\u1780\u17cb \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "$297 = \u1790\u17d2\u179b\u17c3 inbox \u1780\u17d2\u179a\u17c4\u1798\u1798\u17bd\u1799\u1781\u17c2 \u17d4\n"
-                    "\u1794\u17c9\u17bb\u1793\u17d2\u178f\u17c2 Cambodia Biz Agent \u1792\u17d2\u179c\u17be*\u1787\u17b6\u179a\u17c0\u1784\u179a\u17a0\u17bc\u178f* \u17d4\n\n"
-                    "\u1794\u17d2\u179a\u179f\u17b7\u1793\u1794\u17be AI \u1787\u17bd\u1799\u1794\u1784\u1794\u17b7\u1791 5 \u1780\u17b6\u179a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789/\u1781\u17c2 \u2014 $297  \u179a/\u17a0\u17be\u1799 \u17d4"
+                    "💎 *$297 មានតម្លៃចំណាយទេ?*\n\n"
+                    "ចូរឱ្យលេខតបតែ។\n\n"
+                    "*បុគ្គលិក inbox កម្ពុជា:* $200–300/ខែ\n"
+                    "→ 8 ម៉ោង/ថ្ងៃ។ ឈប់ឈរ។ ឈឺ = បន្ថយ productivity ។\n\n"
+                    "*Cambodia Biz Agent Pro $297* — ម្ដងប៉ុណ្ណោះ\n"
+                    "→ 24/7 ។ មិនឈប់ ។ មិនសុំឡើងប្រាក់ ។\n\n"
+                    "─────────\n\n"
+                    "$297 = ថ្លៃ inbox ក្រោមមួយខែ ។\n"
+                    "ប៉ុន្តែ Cambodia Biz Agent ធ្វើ*ជារៀងរហូត* ។\n\n"
+                    "ប្រសិនបើ AI ជួយបងបិទ 5 ការបញ្ជាទិញ/ខែ — $297  រ/ហើយ ។"
                 ),
             },
             "q_warranty": {
-                "label": "\U0001f6e1\ufe0f \u1795\u179b\u17b7\u178f\u1795\u179b\u1798\u17b6\u1793\u1780\u17b6\u179a\u1792\u17b6\u1793\u17b6\u179a\u17c9\u17b6\u1794\u17cb\u179a\u1784?",
+                "label": "🛡️ ផលិតផលមានការធានារ៉ាប់រង?",
                 "answer": (
-                    "\U0001f6e1\ufe0f *\u1795\u179b\u17b7\u178f\u1795\u179b\u1798\u17b6\u1793\u1780\u17b6\u179a\u1792\u17b6\u1793\u17b6? \u17a2\u17b6\u1785\u1794\u1784\u17d2\u179c\u17b7\u179b\u179b\u17bb\u1799?*\n\n"
-                    "\u1798\u17b6\u1793\u1787\u17b6\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b6\u1780\u178a \u17d4 NiMo \u1791\u17c6\u1793\u17bb\u1780\u1785\u17b7\u178f\u17d2\u178f \u17d4\n\n"
-                    "*\u1792\u17b6\u1793\u17b6 30 \u1790\u17d2\u1784\u17c3 \u2014 \u1794\u1784\u17d2\u179c\u17b7\u179b\u179b\u17bb\u1799 100% \u178a\u17c4\u1799/\u17a0\u17c1\u178f\u17bb\u1795\u179b \u17d4*\n\n"
-                    "\u1791\u17b7\u1789 \u17d4 \u1792\u17d2\u179c\u17be\u178f\u17b6\u1798\u1780\u17b6\u179a\u178e\u17c2\u1793\u17b6\u17c6 30 \u1790\u17d2\u1784\u17c3 \u17d4 "
-                    "\u1794\u17d2\u179a\u179f\u17b7\u1793\u1794\u17be/\u178a\u17c6\u178e\u17be\u179a\u1780\u17b6\u179a/\u1796\u17b7\u1796\u178e\u17cc\u1793\u17b6 \u2014 \u1795\u17d2\u1789\u17be NiMo Telegram \u17d4 "
-                    "\u1794\u1784\u17d2\u179c\u17b7\u179b\u1780\u17d2\u1793\u17bb\u1784 24 \u1798\u17c9\u17c4\u1784 \u17d4\n\n"
-                    "*\u17a0\u17b6\u1793\u17b7\u1797\u17d0\u1799: NiMo \u17d4 \u1798\u17b7\u1793/\u1794\u1784 \u17d4* \u2764\ufe0f"
+                    "🛡️ *ផលិតផលមានការធានា? អាចបង្វិលលុយ?*\n\n"
+                    "មានជាការប្រាកដ ។ NiMo ទំនុកចិត្ត ។\n\n"
+                    "*ធានា 30 ថ្ងៃ — បង្វិលលុយ 100% ដោយ/ហេតុផល ។*\n\n"
+                    "ទិញ ។ ធ្វើតាមការណែនាំ 30 ថ្ងៃ ។ "
+                    "ប្រសិនបើ/ដំណើរការ/ពិពណ៌នា — ផ្ញើ NiMo Telegram ។ "
+                    "បង្វិលក្នុង 24 ម៉ោង ។\n\n"
+                    "*ហានិភ័យ: NiMo ។ មិន/បង ។* ❤️"
                 ),
             },
             "q_tech": {
-                "label": "\U0001f630 \u1781\u17d2\u1789\u17bb\u17c6\u1781\u17d2\u179b\u17b6\u1785\u178a\u17c6\u17a1\u17be\u1784\u1798\u17b7\u1793\u1794\u17b6\u1793",
+                "label": "😰 ខ្ញុំខ្លាចដំឡើងមិនបាន",
                 "answer": (
-                    "\U0001f630 *\u1798\u17b7\u1793\u1785\u17c1\u17c7\u1794\u1785\u17d2\u1785\u17c1\u1780\u179c\u17b7\u1791\u17d2\u1799\u17b6 \u2014 \u17a2\u17b6\u1785\u178a\u17c6\u17a1\u17be\u1784\u1794\u17b6\u1793\u1791\u17c1?*\n\n"
-                    "\u1794\u17b6\u1793! \u1793\u17c1\u17c7\u1787\u17b6\u17a0\u17c1\u178f\u17bb\u1795\u179b:\n\n"
-                    "\u2705 \u1780\u17b6\u179a\u178e\u17c2\u1793\u17b6\u17c6\u1787\u17b6\u1797\u17b6\u179f\u17b6\u1781\u17d2\u1798\u17c2\u179a \u1798\u17b6\u1793\u179a\u17bc\u1794\u1797\u17b6\u1796\u1794\u1784\u17d2\u17a0\u17b6\u1789\u1787\u17b6\u1787\u17c6\u17a0\u17b6\u1793\u17d7\n"
-                    "\u2705 \u1798\u17b6\u1793\u179c\u17b8\u178a\u17c1\u17a2\u17bc\u1798\u17be\u179b\u178f\u17b6\u1798\n"
-                    "\u2705 \u1794\u17d2\u179a\u17be Bot \u1787\u17bd\u1799 24/7\n"
-                    "\u2705 NiMo \u1795\u17d2\u1791\u17b6\u179b\u17cb\u1786\u17d2\u179b\u17be\u1799\u1796\u17c1\u179b\u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\n\n"
-                    "\u1780\u1789\u17d2\u1785\u1794\u17cb VIP: NiMo \u17a2\u1784\u17d2\u1782\u17bb\u1799\u178a\u17c6\u17a1\u17be\u1784\u1787\u17b6\u1798\u17bd\u1799\u1794\u1784\u178f\u17b6\u1798 Zoom 2 \u1798\u17c9\u17c4\u1784 \u2014 "
-                    "\u1794\u1784\u1782\u17d2\u179a\u17b6\u1793\u17cb\u178f\u17c2\u1798\u17be\u179b \u17a0\u17be\u1799\u1785\u17bb\u1785\u178f\u17b6\u1798\u17d4 \U0001f3af"
+                    "😰 *មិនចេះបច្ចេកវិទ្យា — អាចដំឡើងបានទេ?*\n\n"
+                    "បាន! នេះជាហេតុផល:\n\n"
+                    "✅ ការណែនាំជាភាសាខ្មែរ មានរូបភាពបង្ហាញជាជំហានៗ\n"
+                    "✅ មានវីដេអូមើលតាម\n"
+                    "✅ ប្រើ Bot ជួយ 24/7\n"
+                    "✅ NiMo ផ្ទាល់ឆ្លើយពេលត្រូវការ\n\n"
+                    "កញ្ចប់ VIP: NiMo អង្គុយដំឡើងជាមួយបងតាម Zoom 2 ម៉ោង — "
+                    "បងគ្រាន់តែមើល ហើយចុចតាម។ 🎯"
                 ),
             },
             "q_time": {
-                "label": "\u23f0 \u1785\u17c6\u178e\u17b6\u1799\u1796\u17c1\u179b\u1794\u17c9\u17bb\u1793\u17d2\u1798\u17b6\u1793\u178a\u17be\u1798\u17d2\u1794\u17b8\u1785\u17b6\u1794\u17cb\u1795\u17d2\u178a\u17be\u1798?",
+                "label": "⏰ ចំណាយពេលប៉ុន្មានដើម្បីចាប់ផ្ដើម?",
                 "answer": (
-                    "\u23f0 *\u1785\u17c6\u178e\u17b6\u1799\u1796\u17c1\u179b\u1794\u17c9\u17bb\u1793\u17d2\u1798\u17b6\u1793\u178a\u17be\u1798\u17d2\u1794\u17b8\u1785\u17b6\u1794\u17cb\u1794\u17d2\u179a\u17be?*\n\n"
-                    "*Basic & Pro:* \u178a\u17c6\u17a1\u17be\u1784\u178f\u17b6\u1798\u1780\u17b6\u179a\u178e\u17c2\u1793\u17b6\u17c6 ~2\u20133 \u1798\u17c9\u17c4\u1784 \u2014 "
-                    "\u1792\u17d2\u179c\u17be\u1796\u17c1\u179b\u179b\u17d2\u1784\u17b6\u1785 \u17d4 \u1790\u17d2\u1784\u17c3 2 \u1798\u17b6\u1793 content \u17d4 \u1790\u17d2\u1784\u17c3 3 \u178a\u17c6\u178e\u17be\u179a\u1780\u17b6\u179a \u17d4\n\n"
-                    "*VIP:* Zoom 2 \u1798\u17c9\u17c4\u1784\u1787\u17b6\u1798\u17bd\u1799 NiMo \u2014 "
-                    "NiMo \u1792\u17d2\u179c\u17be test \u1785\u1794\u17cb\u1794\u17d2\u179a\u1782\u179b\u17cb \u17d4\n\n"
-                    "\u1791\u17b7\u1789\u1796\u17c1\u179b\u1796\u17d2\u179a\u17b9\u1780 \u2014 \u179b\u17d2\u1784\u17b6\u1785\u1798\u17b6\u1793 content \u178a\u17c6\u1794\u17bc\u1784 \U0001f680"
+                    "⏰ *ចំណាយពេលប៉ុន្មានដើម្បីចាប់ប្រើ?*\n\n"
+                    "*Basic & Pro:* ដំឡើងតាមការណែនាំ ~2–3 ម៉ោង — "
+                    "ធ្វើពេលល្ងាច ។ ថ្ងៃ 2 មាន content ។ ថ្ងៃ 3 ដំណើរការ ។\n\n"
+                    "*VIP:* Zoom 2 ម៉ោងជាមួយ NiMo — "
+                    "NiMo ធ្វើ test ចប់ប្រគល់ ។\n\n"
+                    "ទិញពេលព្រឹក — ល្ងាចមាន content ដំបូង 🚀"
                 ),
             },
             "q_device": {
-                "label": "\U0001f4f1 \u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\u17a7\u1794\u1780\u179a\u178e\u17cd\u17a2\u17d2\u179c\u17b8?",
+                "label": "📱 ត្រូវការឧបករណ៍អ្វី?",
                 "answer": (
-                    "\U0001f4f1 *\u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\u17a7\u1794\u1780\u179a\u178e\u17cd\u17a2\u17d2\u179c\u17b8?*\n\n"
-                    "Computer \u17ac smartphone \u1780\u17cf\u1794\u17d2\u179a\u17be\u1794\u17b6\u1793 \U0001f60a\n\n"
-                    "\U0001f4bb *Computer:* NiMo \u178e\u17c2\u1793\u17b6\u17c6 \u178a\u17c6\u17a1\u17be\u1784\u178a\u17c6\u1794\u17bc\u1784 + \u1798\u17be\u179b\u179a\u1794\u17b6\u1799\u1780\u17b6\u179a\u178e\u17cd\n\n"
-                    "\U0001f4f1 *Smartphone:* \u1794\u17d2\u179a\u178f\u17b7\u1794\u178f\u17d2\u178f\u17b7\u1780\u17b6\u179a\u1794\u17d2\u179a\u1785\u17b6\u17c6\u1790\u17d2\u1784\u17c3 \u1786\u17d2\u179b\u17be\u1799 post report\n\n"
-                    "Computer \u178e\u17b6\u178a\u17c2\u179b scroll Facebook \u179f\u17d2\u179a\u17bd\u179b \u2014 \u1794\u17d2\u179a\u17be Cambodia Biz Agent \u1794\u17b6\u1793 \u17d4 "
-                    "\u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a upgrade \u17d4"
+                    "📱 *ត្រូវការឧបករណ៍អ្វី?*\n\n"
+                    "Computer ឬ smartphone ក៏ប្រើបាន 😊\n\n"
+                    "💻 *Computer:* NiMo ណែនាំ ដំឡើងដំបូង + មើលរបាយការណ៍\n\n"
+                    "📱 *Smartphone:* ប្រតិបត្តិការប្រចាំថ្ងៃ ឆ្លើយ post report\n\n"
+                    "Computer ណាដែល scroll Facebook ស្រួល — ប្រើ Cambodia Biz Agent បាន ។ "
+                    "គ្មានការ upgrade ។"
                 ),
             },
             "q_internet": {
-                "label": "\U0001f310 \u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a internet \u179b\u17bf\u1793?",
+                "label": "🌐 ត្រូវការ internet លឿន?",
                 "answer": (
-                    "\U0001f310 *\u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a internet \u179b\u17d2\u1794\u17bf\u1793\u1781\u17d2\u1796\u179f\u17cb?*\n\n"
-                    "\u1798\u17b7\u1793\u1791\u17b6\u1798\u1791\u17b6\u179a \u17d4 Internet \u1794\u17d2\u179a\u17be Facebook + Telegram \u1792\u1798\u17d2\u1798\u178f\u17b6 \u2014 \u1794\u17d2\u179a\u17be Agent \u1794\u17b6\u1793 \u17d4\n\n"
-                    "WiFi \u1795\u17d2\u1791\u17c7 \u17ac 4G \u1780\u17cf OK \u17d4 \u1794\u17d2\u179a\u1796\u17d0\u1793\u17d2\u1792 run cloud \u2014 "
-                    "phone/computer \u1782\u17d2\u179a\u17b6\u1793\u17cb\u178f\u17c2 \u1795\u17d2\u1789\u17be command \U0001f680"
+                    "🌐 *ត្រូវការ internet ល្បឿនខ្ពស់?*\n\n"
+                    "មិនទាមទារ ។ Internet ប្រើ Facebook + Telegram ធម្មតា — ប្រើ Agent បាន ។\n\n"
+                    "WiFi ផ្ទះ ឬ 4G ក៏ OK ។ ប្រព័ន្ធ run cloud — "
+                    "phone/computer គ្រាន់តែ ផ្ញើ command 🚀"
                 ),
             },
             "q_team": {
-                "label": "\U0001f465 \u1794\u17bb\u1782\u17d2\u1782\u179b\u17b7\u1780\u17a2\u17b6\u1785\u1794\u17d2\u179a\u17be\u179a\u17bd\u1798\u1782\u17d2\u1793\u17b6?",
+                "label": "👥 បុគ្គលិកអាចប្រើរួមគ្នា?",
                 "answer": (
-                    "\U0001f465 *\u1794\u17bb\u1782\u17d2\u1782\u179b\u17b7\u1780\u17a0\u17b6\u1784\u17a2\u17b6\u1785\u1794\u17d2\u179a\u17be\u179a\u17bd\u1798?*\n\n"
-                    "\u1794\u17b6\u1793\u1787\u17b6\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b6\u1780\u178a! NiMo \u179a\u1785\u1793\u17b6 Cambodia Biz Agent \u17b1\u17d2\u1799\u1794\u17d2\u179a\u17be team \u1791\u17b6\u17c6\u1784\u1798\u17bc\u179b \U0001f60a\n\n"
-                    "\u2705 Inbox staff \u1794\u17d2\u179a\u17be AI \u1786\u17d2\u179b\u17be\u1799\u17a2\u178f\u17b7\u1790\u17b7\u1787\u1793\n"
-                    "\u2705 Content staff \u1794\u17d2\u179a\u17be AI \u1794\u1784\u17d2\u1780\u17be\u178f\u1780\u17b6\u179a\u1794\u17d2\u179a\u1780\u17b6\u179f\n"
-                    "\u2705 Manager \u1794\u17d2\u179a\u17be AI \u1798\u17be\u179b\u1785\u17c6\u178e\u17bc\u179b\n\n"
-                    "Access account \u178f\u17c2\u1798\u17bd\u1799 \u2014 collaborate \u1784\u17b6\u1799 \u17d4\n\n"
-                    "\U0001f4a1 Claude Pro $20/\u1781\u17c2 share team \u1791\u17b6\u17c6\u1784\u17a2\u179f\u17cb \u2014 "
-                    "\u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a\u1791\u17b7\u1789 account \u178a\u17b6\u1785\u17cb \u17d4"
+                    "👥 *បុគ្គលិកហាងអាចប្រើរួម?*\n\n"
+                    "បានជាការប្រាកដ! NiMo រចនា Cambodia Biz Agent ឱ្យប្រើ team ទាំងមូល 😊\n\n"
+                    "✅ Inbox staff ប្រើ AI ឆ្លើយអតិថិជន\n"
+                    "✅ Content staff ប្រើ AI បង្កើតការប្រកាស\n"
+                    "✅ Manager ប្រើ AI មើលចំណូល\n\n"
+                    "Access account តែមួយ — collaborate ងាយ ។\n\n"
+                    "💡 Claude Pro $20/ខែ share team ទាំងអស់ — "
+                    "គ្មានការទិញ account ដាច់ ។"
                 ),
             },
             "q_data": {
-                "label": "\U0001f512 \u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799\u17a0\u17b6\u1784\u1787\u17d2\u179a\u17b6\u1794\u1785\u17c1\u1789?",
+                "label": "🔒 ទិន្នន័យហាងជ្រាបចេញ?",
                 "answer": (
-                    "\U0001f512 *\u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799\u17a0\u17b6\u1784 \u1787\u17d2\u179a\u17b6\u1794\u1785\u17c1\u1789?*\n\n"
-                    "NiMo \u1792\u17b6\u1793\u17b6: \u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799\u179a\u1794\u179f\u17cb\u1794\u1784\u1798\u17b6\u1793\u179f\u17bb\u179c\u178f\u17d2\u1790\u17b7\u1797\u17b6\u1796 \u17d4\n\n"
-                    "\u2705 \u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799\u1787\u17b6\u179a\u1794\u179f\u17cb\u1794\u1784 \u2014 store \u1780\u17d2\u1793\u17bb\u1784 account \u1795\u17d2\u1791\u17b6\u179b\u17cb \u17d4\n\n"
-                    "\u2705 NiMo \u1798\u17b7\u1793 collect/sell/share \u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799 \u17d4\n\n"
-                    "\u2705 Security \u179f\u17d2\u178a\u1784\u17cb\u178a\u17b6\u179a Anthropic (US) \u2014 "
-                    "\u178a\u17bc\u1785 bank \u1792\u17c6 \u17d4\n\n"
-                    "\u17a0\u17b6\u1784\u1787\u17b6\u179a\u1794\u179f\u17cb\u1794\u1784 \u2192 \u1791\u17b7\u1793\u17d2\u1793\u1793\u17d0\u1799\u1787\u17b6\u179a\u1794\u179f\u17cb\u1794\u1784 \u2192 NiMo \u1798\u17b7\u1793\u1791\u17bb\u1780\u17a2\u17d2\u179c\u17b8 \u2764\ufe0f"
+                    "🔒 *ទិន្នន័យហាង ជ្រាបចេញ?*\n\n"
+                    "NiMo ធានា: ទិន្នន័យរបស់បងមានសុវត្ថិភាព ។\n\n"
+                    "✅ ទិន្នន័យជារបស់បង — store ក្នុង account ផ្ទាល់ ។\n\n"
+                    "✅ NiMo មិន collect/sell/share ទិន្នន័យ ។\n\n"
+                    "✅ Security ស្ដង់ដារ Anthropic (US) — "
+                    "ដូច bank ធំ ។\n\n"
+                    "ហាងជារបស់បង → ទិន្នន័យជារបស់បង → NiMo មិនទុកអ្វី ❤️"
                 ),
             },
             "q_after_warranty": {
-                "label": "\U0001f91d \u1795\u17bb\u178f\u1780\u17b6\u179a\u1792\u17b6\u1793\u17b6 NiMo \u1787\u17bd\u1799?",
+                "label": "🤝 ផុតការធានា NiMo ជួយ?",
                 "answer": (
-                    "\U0001f91d *\u1795\u17bb\u178f 30 \u1790\u17d2\u1784\u17c3 NiMo \u1787\u17bd\u1799?*\n\n"
-                    "\u1780\u17b6\u179a\u1792\u17b6\u1793\u17b6 = policy \u1794\u1784\u17d2\u179c\u17b7\u179b\u179b\u17bb\u1799 \u2014 \u1787\u17c6\u1793\u17bd\u1799 NiMo \u1782\u17d2\u1798\u17b6\u1793\u1780\u17b6\u179a\u1780\u17c6\u178e\u178f\u17cb \U0001f60a\n\n"
-                    "\u2705 Telegram NiMo \u1793\u17c5\u1796\u17c1\u179b\u178e\u17b6 \u2014 \u1787\u17bd\u1799 \u17d4\n\n"
-                    "\u2705 Community group \u2014 \u179a\u17c0\u1793\u1796\u17b8\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1795\u17d2\u179f\u17c1\u1784 \u17d4\n\n"
-                    "\u2705 Update \u1790\u17d2\u1798\u17b8 \u2014 \u17a5\u178f\u1782\u17b7\u178f\u1790\u17d2\u179b\u17c3 \u17d4\n\n"
-                    "NiMo \u1798\u17b7\u1793 abandon \u17d4 \u2764\ufe0f"
+                    "🤝 *ផុត 30 ថ្ងៃ NiMo ជួយ?*\n\n"
+                    "ការធានា = policy បង្វិលលុយ — ជំនួយ NiMo គ្មានការកំណត់ 😊\n\n"
+                    "✅ Telegram NiMo នៅពេលណា — ជួយ ។\n\n"
+                    "✅ Community group — រៀនពីម្ចាស់ហាងផ្សេង ។\n\n"
+                    "✅ Update ថ្មី — ឥតគិតថ្លៃ ។\n\n"
+                    "NiMo មិន abandon ។ ❤️"
                 ),
             },
             "q_update": {
-                "label": "\U0001f199 \u1798\u17b6\u1793\u1780\u17b6\u179a update?",
+                "label": "🆙 មានការ update?",
                 "answer": (
-                    "\U0001f199 *\u1798\u17b6\u1793 update/upgrade \u1790\u17d2\u1784\u17c3\u1780\u17d2\u179a\u17c4\u1799? \u1790\u17d2\u179b\u17c3?*\n\n"
-                    "Update \u1787\u17b6\u1793\u17b7\u1785\u17d2\u1785 \u2014 \u17a5\u178f\u1782\u17b7\u178f\u1790\u17d2\u179b\u17c3 \U0001f381\n\n"
-                    "NiMo upgrade \u1795\u17d2 \u17a2\u17b6\u179f\u17cb feedback \u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784 \u17d4 \u1796\u17c1\u179b\u1798\u17b6\u1793:\n\n"
-                    "\u2705 Feature \u1790\u17d2\u1798\u17b8\n"
-                    "\u2705 AI command \u1794\u17d2\u179a\u179f\u17be\u179a\n"
-                    "\u2705 Speed + effectiveness\n\n"
-                    "\u2192 \u1791\u1791\u17bd\u179b update \u178a\u17c4\u1799 group \u2014 \u178a\u17c4\u1799 pay \u1790\u17d2\u1798\u17b8 \u17d4\n\n"
-                    "\u1791\u17b7\u1789\u1798\u17d2\u178a\u1784 \u2014 upgrade \u1787\u17b6\u179a\u17c0\u1784\u179a\u17a0\u17bc\u178f \u17d4"
+                    "🆙 *មាន update/upgrade ថ្ងៃក្រោយ? ថ្លៃ?*\n\n"
+                    "Update ជានិច្ច — ឥតគិតថ្លៃ 🎁\n\n"
+                    "NiMo upgrade ផ្ អាស់ feedback ម្ចាស់ហាង ។ ពេលមាន:\n\n"
+                    "✅ Feature ថ្មី\n"
+                    "✅ AI command ប្រសើរ\n"
+                    "✅ Speed + effectiveness\n\n"
+                    "→ ទទួល update ដោយ group — ដោយ pay ថ្មី ។\n\n"
+                    "ទិញម្ដង — upgrade ជារៀងរហូត ។"
                 ),
             },
             "q_community": {
-                "label": "\U0001f465 NiMo \u1798\u17b6\u1793 community group?",
+                "label": "👥 NiMo មាន community group?",
                 "answer": (
-                    "\U0001f465 *NiMo \u1798\u17b6\u1793 community group?*\n\n"
-                    "\u1798\u17b6\u1793\u1787\u17b6\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b6\u1780\u178a \U0001f49b\n\n"
-                    "\u1780\u17d2\u179a\u17c4\u1799\u1791\u17b7\u1789 NiMo add \u1785\u17bc\u179b *Telegram community* \u17d4 \u1791\u17b8\u1793\u17c4\u17c7:\n\n"
-                    "\u2705 \u1787\u17bd\u1794\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1781\u17d2\u1798\u17c2\u179a \u2014 \u1785\u17c2\u1780\u179a\u17c6\u179b\u17c2\u1780\u1794\u1791\u1796\u17b7\u179f\u17c4\u1792 \u17d4\n\n"
-                    "\u2705 \u179a\u17c0\u1793 AI \u1794\u17d2\u179a\u1780\u1794\u178a\u17c4\u1799\u1794\u17d2\u179a\u179f\u17b7\u1791\u17d2\u1792 \u17d4\n\n"
-                    "\u2705 Tips + AI command \u1790\u17d2\u1798\u17b8\u1794\u17d2\u179a\u1785\u17b6\u17c6\u179f\u1794\u17d2\u178a\u17b6\u17a0\u17cd \u17d4\n\n"
-                    "\u2705 \u1787\u17c6\u1793\u17bd\u1799 NiMo + community \u17d4\n\n"
-                    "\u1794\u1784\u1798\u17b7\u1793\u178a\u17c2\u179b\u1791\u17c5\u1798\u17d2\u1793\u17b6\u1780\u17cb \u2764\ufe0f"
+                    "👥 *NiMo មាន community group?*\n\n"
+                    "មានជាការប្រាកដ 💛\n\n"
+                    "ក្រោយទិញ NiMo add ចូល *Telegram community* ។ ទីនោះ:\n\n"
+                    "✅ ជួបម្ចាស់ហាងខ្មែរ — ចែករំលែកបទពិសោធ ។\n\n"
+                    "✅ រៀន AI ប្រកបដោយប្រសិទ្ធ ។\n\n"
+                    "✅ Tips + AI command ថ្មីប្រចាំសប្ដាហ៍ ។\n\n"
+                    "✅ ជំនួយ NiMo + community ។\n\n"
+                    "បងមិនដែលទៅម្នាក់ ❤️"
                 ),
             },
             "q_competitor": {
-                "label": "\u2694\ufe0f \u1782\u17bc\u1794\u17d2\u179a\u1787\u17c2\u1784\u1794\u17d2\u179a\u17be Agent \u1795\u1784?",
+                "label": "⚔️ គូប្រជែងប្រើ Agent ផង?",
                 "answer": (
-                    "\u2694\ufe0f *\u1782\u17bc\u1794\u17d2\u179a\u1787\u17c2\u1784\u1794\u17d2\u179a\u17be \u2014 \u1781\u17d2\u1789\u17bb\u17c6\u1793\u17c5 advantage?*\n\n"
-                    "\u1785\u17c6\u179b\u17be\u1799: advantage \u1793\u17c5 \u2014 \u17a0\u17be\u1799\u1792\u17c6\u1787\u17b6\u1784 \u1794\u17d2\u179a\u179f\u17b7\u1793\u1794\u17be\u1785\u17b6\u1794\u17cb\u1795\u17d2\u178a\u17be\u1798\u1798\u17bb\u1793 \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*\u1798\u17d2\u1785\u17b6\u179f\u17cb\u17a0\u17b6\u1784\u1797\u17b6\u1782\u1785\u17d2\u179a\u17be\u1793\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6 \u1798\u17b7\u1793\u1791\u17b6\u1793\u17cb\u1794\u17d2\u179a\u17be AI \u17d4*\n"
-                    "\u179a\u17c0\u1784\u179a\u17b6\u179b\u17cb\u1790\u17d2\u1784\u17c3 wait = \u1790\u17d2\u1784\u17c3 competitor \u1791\u17c5 \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*\u1794\u17d2\u179a\u17be tool \u178a\u17bc\u1785\u1782\u17d2\u1793\u17b6 \u2260 result \u178a\u17bc\u1785\u1782\u17d2\u1793\u17b6 \u17d4*\n\n"
-                    "\u17a0\u17b6\u1784 2 \u1794\u17d2\u179a\u17be tool \u178a\u17bc\u1785 \u2014 \u1794\u17c9\u17bb\u1793\u17d2\u178f\u17c2:\n"
-                    "\u2022 \u1795\u179b\u17b7\u178f\u1795\u179b \u2260\n"
-                    "\u2022 Brand style \u2260\n"
-                    "\u2022 Customer approach \u2260\n\n"
-                    "AI \u179a\u17c0\u1793\u178f\u17b6\u1798 \u17a0\u17b6\u1784\u1794\u1784 \u2014 \u1782\u17d2\u1798\u17b6\u1793 copy \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "Advantage = \u1794\u17d2\u179a\u17be *\u179b\u17bf\u1793 \u1794\u17d2\u179a\u179f\u17be\u179a \u179f\u17d2\u1790\u17b7\u178f\u1790\u17c1\u179a* \u1787\u17b6\u1784 \u17d4"
+                    "⚔️ *គូប្រជែងប្រើ — ខ្ញុំនៅ advantage?*\n\n"
+                    "ចំលើយ: advantage នៅ — ហើយធំជាង ប្រសិនបើចាប់ផ្ដើមមុន ។\n\n"
+                    "─────────\n\n"
+                    "*ម្ចាស់ហាងភាគច្រើនកម្ពុជា មិនទាន់ប្រើ AI ។*\n"
+                    "រៀងរាល់ថ្ងៃ wait = ថ្ងៃ competitor ទៅ ។\n\n"
+                    "─────────\n\n"
+                    "*ប្រើ tool ដូចគ្នា ≠ result ដូចគ្នា ។*\n\n"
+                    "ហាង 2 ប្រើ tool ដូច — ប៉ុន្តែ:\n"
+                    "• ផលិតផល ≠\n"
+                    "• Brand style ≠\n"
+                    "• Customer approach ≠\n\n"
+                    "AI រៀនតាម ហាងបង — គ្មាន copy ។\n\n"
+                    "─────────\n\n"
+                    "Advantage = ប្រើ *លឿន ប្រសើរ ស្ថិតថេរ* ជាង ។"
                 ),
             },
             "q_think": {
-                "label": "\U0001f914 \u179f\u17bc\u1798\u1791\u17bb\u17d2\u1799\u1785\u17b7\u178f\u17d2\u178f\u1794\u1793\u17d2\u1790\u17c2\u1798",
+                "label": "🤔 សូមទុ្យចិត្តបន្ថែម",
                 "answer": (
-                    "\U0001f914 *\u179f\u17bc\u1798\u1791\u17bb\u17d2\u1799\u1785\u17b7\u178f\u17d2\u178f\u1794\u1793\u17d2\u1790\u17c2\u1798*\n\n"
-                    "\u1785\u17c6\u1796\u17c4\u17c7 \u2014 \u1780\u17b6\u179a \u2460\u1785\u17c6\u178e \u2461\u1785\u17c6\u178e \u2462 \u2462 \U0001f60a\n\n"
-                    "\u1794\u17c9\u17bb\u1793\u17d2\u178f\u17c2 NiMo \u1785\u1784\u17cb\u17b1\u17d2\u1799\u1794\u1784\u178a\u17b9\u1784 3 \u1785\u17c6\u178e\u17bb\u1785:\n\n"
-                    "*\u1791\u17b8\u1798\u17bd\u1799 \u2014 \u178f\u1798\u17d2\u179b\u17c3 early bird \u17d4*\n"
-                    "\u1780\u17d2\u179a\u17c4\u1799 launch \u17d4 \u17d4 \u17d4 \u178f\u1798\u17d2\u179b\u17c3 \u2191 \u17d4 \u1791\u17b7\u1789\u1790\u17d2\u1784\u17c3\u1793\u17c1\u17c7 = best price \u17d4\n\n"
-                    "*\u1791\u17b8\u1796\u17b8\u179a \u2014 \u1792\u17b6\u1793\u17b6 30 \u1790\u17d2\u1784\u17c3 100% \u17d4*\n"
-                    "= Try \u178a\u17c4\u1799 risk \u2248 0 \u17d4 \u1798\u17b7\u1793good \u2192 \u1794\u17d2\u179a\u17b6\u1780\u17cb back \u17d4\n\n"
-                    "*\u1791\u17b8\u1794\u17b8 \u2014 \u179a\u17c0\u1784\u179a\u17b6\u179b\u17cb\u1790\u17d2\u1784\u17c3 wait = \u1790\u17d2\u1784\u17c3 lose \u17d4*\n"
-                    "\u1796\u17c1\u179b order \u1794\u17b6\u178f\u17cb c\u01a1h\u1ed9i \u17d4 \u17d4 \u17d4 \u17d4 \u17d4 \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "\u1794\u1784\u178f\u17d2\u179a\u17bc\u179c info \u1794\u1793\u17d2\u1790\u17c2\u1798? NiMo \u1793\u17c5\u1791\u17b8\u1793\u17c1\u17c7 \U0001f60a"
+                    "🤔 *សូមទុ្យចិត្តបន្ថែម*\n\n"
+                    "ចំពោះ — ការ ①ចំណ ②ចំណ ③ ③ 😊\n\n"
+                    "ប៉ុន្តែ NiMo ចង់ឱ្យបងដឹង 3 ចំណុច:\n\n"
+                    "*ទីមួយ — តម្លៃ early bird ។*\n"
+                    "ក្រោយ launch ។ ។ ។ តម្លៃ ↑ ។ ទិញថ្ងៃនេះ = best price ។\n\n"
+                    "*ទីពីរ — ធានា 30 ថ្ងៃ 100% ។*\n"
+                    "= Try ដោយ risk ≈ 0 ។ មិនgood → ប្រាក់ back ។\n\n"
+                    "*ទីបី — រៀងរាល់ថ្ងៃ wait = ថ្ងៃ lose ។*\n"
+                    "ពេល order បាត់ cơhội ។ ។ ។ ។ ។ ។\n\n"
+                    "─────────\n\n"
+                    "បងត្រូវ info បន្ថែម? NiMo នៅទីនេះ 😊"
                 ),
             },
             "q_try": {
-                "label": "\U0001f9ea \u1785\u1784\u17cb\u179f\u17b6\u1780\u179b\u17d2\u1794\u1784\u1798\u17bb\u1793\u1791\u17b7\u1789",
+                "label": "🧪 ចង់សាកល្បងមុនទិញ",
                 "answer": (
-                    "\U0001f9ea *\u1785\u1784\u17cb\u179f\u17b6\u1780\u179b\u17d2\u1794\u1784\u1798\u17bb\u1793\u1791\u17b7\u1789*\n\n"
-                    "NiMo \u1799\u179b\u17cb \U0001f60a\n\n"
-                    "\u1794\u17c9\u17bb\u1793\u17d2\u178f\u17c2: Try = result \u1796\u17b7\u178f\u1794\u17d2\u179a\u17b6\u1780\u178a \u1793\u17c5 \u17a0\u17b6\u1784 \u1796\u17b7\u178f\u1794\u17d2\u179a\u17b6\u1780\u178a \u17d4\n"
-                    "*\u1798\u17b7\u1793 \u17a2\u17b6\u1785\u1792\u17d2\u179c\u17be \u178a\u17c4\u1799/\u1785\u17b6\u1794\u17cb '\u1796\u17b7\u178f\u1794\u17d2\u179a\u17b6\u1780\u178a \u17d4*\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "\u17a0\u17be\u1799 NiMo \u1798\u17b6\u1793 *Basic $97* = 'free trial with refund':\n\n"
-                    "\u2705 5 AI Employees \u1796\u17c1\u1789\n"
-                    "\u2705 Run \u17a0\u17b6\u1784\u1796\u17b7\u178f\u1794\u17d2\u179a\u17b6\u1780\u178a\n"
-                    "\u2705 Result 30 \u1790\u17d2\u1784\u17c3\n"
-                    "\u2705 \u2260good \u2192 100% back\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*Risk \u1796\u17b7\u178f = continue \u1798\u17d2\u1793\u17b6\u1780\u17cb \u2014 \u1781\u178e\u17c8/\u1785 way \u17d4*"
+                    "🧪 *ចង់សាកល្បងមុនទិញ*\n\n"
+                    "NiMo យល់ 😊\n\n"
+                    "ប៉ុន្តែ: Try = result ពិតប្រាកដ នៅ ហាង ពិតប្រាកដ ។\n"
+                    "*មិន អាចធ្វើ ដោយ/ចាប់ 'ពិតប្រាកដ ។*\n\n"
+                    "─────────\n\n"
+                    "ហើយ NiMo មាន *Basic $97* = 'free trial with refund':\n\n"
+                    "✅ 5 AI Employees ពេញ\n"
+                    "✅ Run ហាងពិតប្រាកដ\n"
+                    "✅ Result 30 ថ្ងៃ\n"
+                    "✅ ≠good → 100% back\n\n"
+                    "─────────\n\n"
+                    "*Risk ពិត = continue ម្នាក់ — ខណៈ/ច way ។*"
                 ),
             },
             "q_claude_pro": {
-                "label": "\U0001f4b3 Claude Pro $20/\u1781\u17c2 \u1787\u17b6\u17a2\u17d2\u179c\u17b8?",
+                "label": "💳 Claude Pro $20/ខែ ជាអ្វី?",
                 "answer": (
-                    "\U0001f4b3 *Claude Pro $20/\u1781\u17c2 \u1787\u17b6\u17a2\u17d2\u179c\u17b8? \u178f\u1798\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a?*\n\n"
-                    "Cambodia Biz Agent run \u179b\u17be Claude AI (Anthropic \u2014 US) \u17d4 "
-                    "\u178a\u17be\u1798\u17d2\u1794\u17b8\u1794\u17d2\u179a\u17be \u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a Claude Pro *$20/\u1781\u17c2* \u2014 "
-                    "\u1785\u17c6\u178e\u17b6\u1799 Anthropic \u1795\u17d2\u1791\u17b6\u179b\u17cb \u1798\u17b7\u1793 NiMo \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "\u1794\u17c9\u17bb\u1793\u17d2\u178f\u17c2 cost \u1796\u17b7\u178f:\n\n"
-                    "\u2705 $20/\u1781\u17c2 = 1 employee 24/7 \u17d4\n"
-                    "\u2705 AI Agents \u1791\u17b6\u17c6\u1784 5 run account 1 \u17d4\n"
-                    "\u2705 Cancel \u1796\u17c1\u179b\u178e\u17b6 \u17d4\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "Inbox staff \u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6 = $200\u2013300/\u1781\u17c2 \u17d4\n"
-                    "Claude Pro = $20/\u1781\u17c2 \u17d4 *Save $180\u2013280/\u1781\u17c2 \u17d4*"
+                    "💳 *Claude Pro $20/ខែ ជាអ្វី? តម្រូវការ?*\n\n"
+                    "Cambodia Biz Agent run លើ Claude AI (Anthropic — US) ។ "
+                    "ដើម្បីប្រើ ត្រូវការ Claude Pro *$20/ខែ* — "
+                    "ចំណាយ Anthropic ផ្ទាល់ មិន NiMo ។\n\n"
+                    "─────────\n\n"
+                    "ប៉ុន្តែ cost ពិត:\n\n"
+                    "✅ $20/ខែ = 1 employee 24/7 ។\n"
+                    "✅ AI Agents ទាំង 5 run account 1 ។\n"
+                    "✅ Cancel ពេលណា ។\n\n"
+                    "─────────\n\n"
+                    "Inbox staff កម្ពុជា = $200–300/ខែ ។\n"
+                    "Claude Pro = $20/ខែ ។ *Save $180–280/ខែ ។*"
                 ),
             },
             "q_riel": {
-                "label": "\U0001f4b5 \u17a2\u17b6\u1785\u1794\u1784\u17cb\u1787\u17b6\u179a\u17c0\u179b\u1794\u17b6\u1793?",
+                "label": "💵 អាចបង់ជារៀលបាន?",
                 "answer": (
-                    "\U0001f4b5 *\u17a2\u17b6\u1785\u1794\u1784\u17cb\u1787\u17b6\u179a\u17c0\u179b?*\n\n"
-                    "\u1794\u17b6\u1793\u1787\u17b6\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b6\u1780\u178a! \u1795\u17d2\u1791\u17c1\u179a\u179a\u17c0\u179b\u1792\u1798\u17d2\u1798\u178f\u17b6 \u2014 "
-                    "ABA convert USD \u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7 \u17d4\n\n"
-                    "\U0001f7e6 *Basic $97* \u2248 400,000 Riel\n"
-                    "\u2b50 *Pro $297* \u2248 1,200,000 Riel\n"
-                    "\U0001f7e1 *VIP $597* \u2248 2,400,000 Riel"
+                    "💵 *អាចបង់ជារៀល?*\n\n"
+                    "បានជាការប្រាកដ! ផ្ទេររៀលធម្មតា — "
+                    "ABA convert USD ស្វ័យប្រវត្តិ ។\n\n"
+                    "🟦 *Basic $97* ≈ 400,000 Riel\n"
+                    "⭐ *Pro $297* ≈ 1,200,000 Riel\n"
+                    "🟡 *VIP $597* ≈ 2,400,000 Riel"
                 ),
             },
             "q_industry": {
-                "label": "\U0001f6cd\ufe0f \u17a0\u17b6\u1784\u1781\u17d2\u1789\u17bb\u17c6 \u2260 tech \u17a2\u17b6\u1785\u1794\u17d2\u179a\u17be?",
+                "label": "🛍️ ហាងខ្ញុំ ≠ tech អាចប្រើ?",
                 "answer": (
-                    "\U0001f6cd\ufe0f *\u17a0\u17b6\u1784\u1781\u17d2\u1789\u17bb\u17c6 [food/fashion/beauty]\u2026 \u1794\u17d2\u179a\u17be Agent \u1794\u17b6\u1793?*\n\n"
-                    "NiMo \u1786\u17d2\u179b\u17be\u1799: *\u1794\u17d2\u179a\u179f\u17b7\u1793\u1794\u17be sell online \u1793\u17c5\u1780\u1798\u17d2\u1796\u17bb\u1787\u17b6 \u2014 \u1794\u17d2\u179a\u17be\u1794\u17b6\u1793 \u17d4*\n\n"
+                    "🛍️ *ហាងខ្ញុំ [food/fashion/beauty]… ប្រើ Agent បាន?*\n\n"
+                    "NiMo ឆ្លើយ: *ប្រសិនបើ sell online នៅកម្ពុជា — ប្រើបាន ។*\n\n"
                     "NiMo tested:\n\n"
-                    "\U0001f457 Fashion & accessories\n"
-                    "\U0001f484 Beauty & skincare\n"
-                    "\U0001f371 Food & specialty\n"
-                    "\U0001f4da Courses & consulting\n"
-                    "\U0001f486 Spa, salon, studio\n"
-                    "\U0001f3e0 Furniture & home\n"
-                    "\U0001f338 Flowers & gifts\n\n"
-                    "AI \u179a\u17c0\u1793\u178f\u17b6\u1798 \u1795\u179b\u17b7\u178f\u1795\u179b + style \u17a0\u17b6\u1784 \u2014 \u1798\u17b7\u1793 apply formula rigid \u17d4\n\n"
-                    "\u1798\u17b7\u1793\u1794\u17d2\u179a\u17b6\u1780\u178a? \u1794\u17d2\u179a\u17b6\u1794\u17cb niche NiMo \u2014 \u1796\u17b7\u1782\u17d2\u179a\u17c4\u17c7 free \U0001f447"
+                    "👗 Fashion & accessories\n"
+                    "💄 Beauty & skincare\n"
+                    "🍱 Food & specialty\n"
+                    "📚 Courses & consulting\n"
+                    "💆 Spa, salon, studio\n"
+                    "🏠 Furniture & home\n"
+                    "🌸 Flowers & gifts\n\n"
+                    "AI រៀនតាម ផលិតផល + style ហាង — មិន apply formula rigid ។\n\n"
+                    "មិនប្រាកដ? ប្រាប់ niche NiMo — ពិគ្រោះ free 👇"
                 ),
             },
             "q_delivery": {
-                "label": "\U0001f4e6 \u1795\u17d2\u1791\u17c1\u179a\u200b\u1794\u17d2\u179a\u17b6\u1780\u17cb\u200b\u17a0\u17be\u1799\u200b \u1791\u1791\u17bd\u179b\u200b\u178a\u17bc\u1785\u200b\u1798\u17d2\u178a\u17c1\u1785?",
+                "label": "📦 ផ្ទេរ​ប្រាក់​ហើយ​ ទទួល​ដូច​ម្ដេច?",
                 "answer": (
-                    "\U0001f4e6 *\u1780\u17d2\u179a\u17c4\u1799\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb \u1791\u1791\u17bd\u179b\u178a\u17bc\u1785\u1798\u17d2\u178a\u17c1\u1785?*\n\n"
-                    "\u1784\u17b6\u1799 \u2014 4 \u1787\u17c6\u17a0\u17b6\u1793:\n\n"
-                    "*\u1787\u17c6\u17a0\u17b6\u1793 1 \u2014 \u1795\u17d2\u1791\u17c1\u179a*\n"
-                    "\u1787\u17d2\u179a\u17be\u179f package \u2192 \u1795\u17d2\u1791\u17c1\u179a info NiMo \u1795\u17d2\u178a\u179b\u17cb\n\n"
-                    "*\u1787\u17c6\u17a0\u17b6\u1793 2 \u2014 \u1795\u17d2\u1789\u17be confirm*\n"
-                    "Screenshot \u2192 \u1788\u17d2\u1798\u17c4\u17c7 + phone + package \u2192 \u1795\u17d2\u1789\u17be bot\n\n"
-                    "*\u1787\u17c6\u17a0\u17b6\u1793 3 \u2014 NiMo confirm & \u1795\u17d2\u1789\u17be*\n"
-                    "NiMo verify + \u1795\u17d2\u1789\u17be product \u1780\u17d2\u1793\u17bb\u1784 30 \u1793\u17b6\u1791\u17b8\n\n"
-                    "*\u1787\u17c6\u17a0\u17b6\u1793 4 \u2014 \u1791\u1791\u17bd\u179b + \u1785\u17b6\u1794\u17cb\u1795\u17d2\u178a\u17be\u1798*\n"
-                    "Kit + guide PDF + video + group support \U0001f680\n\n"
-                    "*VIP:* \u1780\u17d2\u179a\u17c4\u1799\u1791\u1791\u17bd\u179b Kit NiMo \u178e\u17b6\u178f\u17cb Zoom \u17d4"
+                    "📦 *ក្រោយផ្ទេរប្រាក់ ទទួលដូចម្ដេច?*\n\n"
+                    "ងាយ — 4 ជំហាន:\n\n"
+                    "*ជំហាន 1 — ផ្ទេរ*\n"
+                    "ជ្រើស package → ផ្ទេរ info NiMo ផ្ដល់\n\n"
+                    "*ជំហាន 2 — ផ្ញើ confirm*\n"
+                    "Screenshot → ឈ្មោះ + phone + package → ផ្ញើ bot\n\n"
+                    "*ជំហាន 3 — NiMo confirm & ផ្ញើ*\n"
+                    "NiMo verify + ផ្ញើ product ក្នុង 30 នាទី\n\n"
+                    "*ជំហាន 4 — ទទួល + ចាប់ផ្ដើម*\n"
+                    "Kit + guide PDF + video + group support 🚀\n\n"
+                    "*VIP:* ក្រោយទទួល Kit NiMo ណាត់ Zoom ។"
                 ),
             },
         },
         "cats": {
             "cat_intro": {
-                "label": "\U0001f50d \u179f\u17d2\u179c\u17c2\u1784\u1799\u179b\u17cb\u17a2\u17c6\u1796\u17b8 Cambodia Biz Agent",
+                "label": "🔍 ស្វែងយល់អំពី Cambodia Biz Agent",
                 "questions": ["q_nimo", "q_system", "q_different", "q_save", "q_location"],
             },
             "cat_price": {
-                "label": "\U0001f4b0 \u178f\u1798\u17d2\u179b\u17c3 & \u1780\u1789\u17d2\u1785\u1794\u17cb",
+                "label": "💰 តម្លៃ & កញ្ចប់",
                 "questions": ["q_price", "q_which_plan", "q_worth", "q_warranty"],
             },
             "cat_tech": {
-                "label": "\U0001f6e0\ufe0f \u1780\u17b6\u179a\u178a\u17c6\u17a1\u17be\u1784 & \u1794\u1785\u17d2\u1785\u17c1\u1780\u179c\u17b7\u1791\u17d2\u1799\u17b6",
+                "label": "🛠️ ការដំឡើង & បច្ចេកវិទ្យា",
                 "questions": ["q_tech", "q_time", "q_device", "q_internet", "q_team"],
             },
             "cat_support": {
-                "label": "\U0001f512 \u1780\u17b6\u179a\u1792\u17b6\u1793\u17b6 & \u1787\u17c6\u1793\u17bd\u1799",
+                "label": "🔒 ការធានា & ជំនួយ",
                 "questions": ["q_data", "q_after_warranty", "q_update", "q_community"],
             },
             "cat_doubt": {
-                "label": "\U0001f914 \u1793\u17c5\u178f\u17c2\u179f\u17d2\u1791\u17b6\u1780\u17cb\u179f\u17d2\u1791\u17be\u179a",
+                "label": "🤔 នៅតែស្ទាក់ស្ទើរ",
                 "questions": ["q_competitor", "q_think", "q_try"],
             },
             "cat_buy": {
-                "label": "\U0001f6cd\ufe0f \u1780\u17b6\u179a\u1791\u17b7\u1789",
+                "label": "🛍️ ការទិញ",
                 "questions": ["q_claude_pro", "q_riel", "q_industry", "q_delivery"],
             },
         },
         "s": {
             "welcome": (
-                "\U0001f44b \u179f\u17bd\u179f\u17d2\u178f\u17b8! \u1781\u17d2\u1789\u17bb\u17c6\u1787\u17b6\u1787\u17c6\u1793\u17bd\u1799\u1780\u17b6\u179a\u179a\u1794\u179f\u17cb *NiMo Team*\u17d4\n\n"
-                "\u1794\u1784\u1798\u17b6\u1793\u179f\u17c6\u178e\u17bd\u179a\u17a2\u17d2\u179c\u17b8\u17a2\u17c6\u1796\u17b8 *Cambodia Biz Agent*?\n"
-                "\u1787\u17d2\u179a\u17be\u179f\u179f\u17c6\u178e\u17bd\u179a\u1781\u17b6\u1784\u1780\u17d2\u179a\u17c4\u1798 \u2014 \u1781\u17d2\u1789\u17bb\u17c6\u1786\u17d2\u179b\u17be\u1799\u1797\u17d2\u179b\u17b6\u1798\u17d7 \U0001f447"
+                "👋 សួស្តី! ខ្ញុំជាជំនួយការរបស់ *NiMo Team*។\n\n"
+                "បងមានសំណួរអ្វីអំពី *Cambodia Biz Agent*?\n"
+                "ជ្រើសសំណួរខាងក្រោម — ខ្ញុំឆ្លើយភ្លាមៗ 👇"
             ),
-            "choose_cat":       "\u1787\u17d2\u179a\u17be\u179f\u179f\u17c6\u178e\u17bd\u179a\u178a\u17c2\u179b\u1794\u1784\u1785\u1784\u17cb\u178a\u17b9\u1784:",
+            "choose_cat":       "ជ្រើសសំណួរដែលបងចង់ដឹង:",
             "buy_title": (
-                "\U0001f389 *\u179b\u17d2\u17a2\u178e\u17b6\u179f\u17cb! \u1794\u1784\u1785\u1784\u17cb\u1787\u17d2\u179a\u17be\u179f\u1780\u1789\u17d2\u1785\u1794\u17cb\u178e\u17b6?*\n\n"
-                "\U0001f7e6 *Basic $97* \u2014 \u179f\u17b6\u1780\u179b\u17d2\u1794\u1784\u1798\u17bb\u1793\n"
-                "\u2b50 *Pro $297* \u2014 \u179f\u17d2\u179c\u17d0\u1799\u1794\u17d2\u179a\u179c\u178f\u17d2\u178f\u17b7 24/7\n"
-                "\U0001f7e1 *VIP $597* \u2014 NiMo \u178a\u17c6\u17a1\u17be\u1784\u1787\u17c6\u1793\u17bd\u179f\n\n"
-                "\u1787\u17d2\u179a\u17be\u179f\u1780\u1789\u17d2\u1785\u1794\u17cb \U0001f447"
+                "🎉 *ល្អណាស់! បងចង់ជ្រើសកញ្ចប់ណា?*\n\n"
+                "🟦 *Basic $97* — សាកល្បងមុន\n"
+                "⭐ *Pro $297* — ស្វ័យប្រវត្តិ 24/7\n"
+                "🟡 *VIP $597* — NiMo ដំឡើងជំនួស\n\n"
+                "ជ្រើសកញ្ចប់ 👇"
             ),
-            "buy_btn":          "\U0001f4b3 \u1781\u17d2\u1789\u17bb\u17c6\u1785\u1784\u17cb\u1791\u17b7\u1789\u17a5\u17a1\u17bc\u179c",
-            "consult_btn":      "\U0001f4ac \u179f\u17bd\u179a NiMo \u178a\u17c4\u1799\u1795\u17d2\u1791\u17b6\u179b\u17cb",
-            "back_btn":         "\u2b05\ufe0f \u178f\u17d2\u179a\u17a1\u1794\u17cb\u1791\u17c5\u1798\u17c9\u17ba\u1793\u17bb\u1799",
-            "back_cat":         "\u2b05\ufe0f \u179f\u17c6\u178e\u17bd\u179a\u1795\u17d2\u179f\u17c1\u1784\u1791\u17c0\u178f",
-            "unsure_btn":       "\U0001f914 \u1781\u17d2\u1789\u17bb\u17c6\u1798\u17b7\u1793\u1791\u17b6\u1793\u17cb\u1794\u17d2\u179a\u17b6\u1780\u178a \u2014 \u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\u1796\u17b7\u1782\u17d2\u179a\u17c4\u17c7",
+            "buy_btn":          "💳 ខ្ញុំចង់ទិញឥឡូវ",
+            "consult_btn":      "💬 សួរ NiMo ដោយផ្ទាល់",
+            "back_btn":         "⬅️ ត្រឡប់ទៅម៉ឺនុយ",
+            "back_cat":         "⬅️ សំណួរផ្សេងទៀត",
+            "unsure_btn":       "🤔 ខ្ញុំមិនទាន់ប្រាកដ — ត្រូវការពិគ្រោះ",
             "consult_msg": (
-                f"\U0001f4ac <b>\u179f\u17bd\u179f\u17d2\u178f\u17b8! NiMo \u179a\u17b8\u1780\u179a\u17b6\u1799\u1787\u17bd\u1799\u1794\u1784</b> \u2764\ufe0f\n\n"
-                f"\u1785\u17bb\u1785\u179b\u17b8\u1784\u1781\u17b6\u1784\u1780\u17d2\u179a\u17c4\u1798 \u178a\u17be\u1798\u17d2\u1794\u17b8\u1791\u17c6\u1793\u17b6\u1780\u17cb\u1791\u17c6\u1793\u1784\u1795\u17d2\u1791\u17b6\u179b\u17cb\u1787\u17b6\u1798\u17bd\u1799\u17a2\u17d2\u1793\u1780\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6:\n\n"
-                f"\U0001f449 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
-                f"<i>\u1794\u1793\u17d2\u1791\u17b6\u1794\u17cb\u1796\u17b8\u1791\u1791\u17bd\u179b\u1780\u17b6\u179a\u1794\u17d2\u179a\u17b9\u1780\u17d2\u179f\u17b6 \u179f\u17bc\u1798\u178f\u17d2\u179a\u17a1\u1794\u17cb\u1798\u1780\u1791\u17b7\u1789\u178a\u17c4\u1799\u1794\u17d2\u179a\u17be /start</i> \U0001f6d2"
+                f"💬 <b>សួស្តី! NiMo រីករាយជួយបង</b> ❤️\n\n"
+                f"ចុចលីងខាងក្រោម ដើម្បីទំនាក់ទំនងផ្ទាល់ជាមួយអ្នកប្រឹក្សា:\n\n"
+                f"👉 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
+                f"<i>បន្ទាប់ពីទទួលការប្រឹក្សា សូមត្រឡប់មកទិញដោយប្រើ /start</i> 🛒"
             ),
-            "end_consult_btn":  "\U0001f51a \u1794\u1789\u17d2\u1785\u1794\u17cb \u2014 \u178f\u17d2\u179a\u17a1\u1794\u17cb\u1791\u17c5\u1798\u17c9\u17ba\u1793\u17bb\u1799",
-            "end_consult_msg":  "\u2705 \u1794\u17b6\u1793\u1794\u1789\u17d2\u1785\u1794\u17cb\u17d4 \u17a2\u179a\u1782\u17bb\u178e\u1794\u1784 \u2764\ufe0f\n\n\u1785\u17bb\u1785 /start \u178a\u17be\u1798\u17d2\u1794\u17b8\u1794\u17be\u1780\u1798\u17c9\u17ba\u1793\u17bb\u1799\u17d4",
-            "confirm_paid_btn": "\u2705 \u1781\u17d2\u1789\u17bb\u17c6\u1794\u17b6\u1793\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb\u179a\u17bd\u1785\u17a0\u17be\u1799",
-            "ask_more_btn":     "\u2753 \u1781\u17d2\u1789\u17bb\u17c6\u178f\u17d2\u179a\u17bc\u179c\u1780\u17b6\u179a\u179f\u17bd\u179a\u1794\u1793\u17d2\u1790\u17c2\u1798",
-            "view_payment_btn": "\U0001f4b3 \u1798\u17be\u179b\u1796\u17d0\u178f\u17cc\u1798\u17b6\u1793\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb",
-            "unknown_msg":      "\u1781\u17d2\u1789\u17bb\u17c6\u1791\u1791\u17bd\u179b\u1794\u17b6\u1793\u179f\u17b6\u179a\u1794\u1784\u17a0\u17be\u1799 \u2764\ufe0f\n\n\u1794\u1784\u1785\u1784\u17cb:",
-            "ask_bill":         "\U0001f4f8 *\u1787\u17c6\u17a0\u17b6\u1793\u1791\u17b8 1/3: \u1795\u17d2\u1789\u17be\u179a\u17bc\u1794\u1797\u17b6\u1796\u1794\u1784\u17d2\u1780\u17b6\u1793\u17cb\u178a\u17c3*\n\n\u179f\u17bc\u1798 *\u1790\u178f\u17a2\u17c1\u1780\u17d2\u179a\u1784\u17cb* \u1780\u17b6\u179a\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb \U0001f447",
-            "need_photo":       "\u26a0\ufe0f \u179f\u17bc\u1798\u1795\u17d2\u1789\u17be *\u179a\u17bc\u1794\u1797\u17b6\u1796* \u1794\u1784\u17d2\u1780\u17b6\u1793\u17cb\u178a\u17c3 \U0001f4f8",
-            "ask_name":         "\u2705 \u1791\u1791\u17bd\u179b\u1794\u17b6\u1793\u179a\u17bc\u1794\u1797\u17b6\u1796\u17a0\u17be\u1799!\n\n\U0001f464 *\u1787\u17c6\u17a0\u17b6\u1793\u1791\u17b8 2/3: \u1788\u17d2\u1798\u17c4\u17c7\u1796\u17c1\u1789*\n\n\u179f\u17bc\u1798\u179c\u17b6\u1799\u1788\u17d2\u1798\u17c4\u17c7\u179a\u1794\u179f\u17cb\u1794\u1784:",
-            "need_text":        "\u26a0\ufe0f \u179f\u17bc\u1798\u179c\u17b6\u1799\u1787\u17b6\u17a2\u1780\u17d2\u179f\u179a\u17d4",
-            "ask_phone":        "\u2705 \u1791\u1791\u17bd\u179b\u1794\u17b6\u1793\u1788\u17d2\u1798\u17c4\u17c7\u17a0\u17be\u1799!\n\n\U0001f4f1 *\u1787\u17c6\u17a0\u17b6\u1793\u1791\u17b8 3/3: \u179b\u17c1\u1781\u1791\u17bc\u179a\u179f\u17d0\u1796\u17d2\u1791*\n\n\u179f\u17bc\u1798\u1794\u1789\u17d2\u1785\u17bc\u179b\u179b\u17c1\u1781\u1791\u17bc\u179a\u179f\u17d0\u1796\u17d2\u1791:",
+            "end_consult_btn":  "🔚 បញ្ចប់ — ត្រឡប់ទៅម៉ឺនុយ",
+            "end_consult_msg":  "✅ បានបញ្ចប់។ អរគុណបង ❤️\n\nចុច /start ដើម្បីបើកម៉ឺនុយ។",
+            "confirm_paid_btn": "✅ ខ្ញុំបានផ្ទេរប្រាក់រួចហើយ",
+            "ask_more_btn":     "❓ ខ្ញុំត្រូវការសួរបន្ថែម",
+            "view_payment_btn": "💳 មើលព័ត៌មានផ្ទេរប្រាក់",
+            "unknown_msg":      "ខ្ញុំទទួលបានសារបងហើយ ❤️\n\nបងចង់:",
+            "ask_bill":         "📸 *ជំហានទី 1/3: ផ្ញើរូបភាពបង្កាន់ដៃ*\n\nសូម *ថតអេក្រង់* ការផ្ទេរប្រាក់ 👇",
+            "need_photo":       "⚠️ សូមផ្ញើ *រូបភាព* បង្កាន់ដៃ 📸",
+            "ask_name":         "✅ ទទួលបានរូបភាពហើយ!\n\n👤 *ជំហានទី 2/3: ឈ្មោះពេញ*\n\nសូមវាយឈ្មោះរបស់បង:",
+            "need_text":        "⚠️ សូមវាយជាអក្សរ។",
+            "ask_phone":        "✅ ទទួលបានឈ្មោះហើយ!\n\n📱 *ជំហានទី 3/3: លេខទូរស័ព្ទ*\n\nសូមបញ្ចូលលេខទូរស័ព្ទ:",
             "complete_msg": (
-                "\U0001f389 *\u1791\u1791\u17bd\u179b\u1794\u17b6\u1793\u1796\u17d0\u178f\u17cc\u1798\u17b6\u1793\u1782\u17d2\u179a\u1794\u17cb\u1782\u17d2\u179a\u17b6\u1793\u17cb\u17a0\u17be\u1799!*\n\n"
-                "\U0001f4cb *\u179f\u1784\u17d2\u1781\u17c1\u1794\u1780\u17b6\u179a\u1794\u1789\u17d2\u1787\u17b6\u1791\u17b7\u1789:*\n"
-                "\u2022 \u179b\u17c1\u1781\u1780\u17bc\u178a: `{order_id}`\n"
-                "\u2022 \u1788\u17d2\u1798\u17c4\u17c7: {name}\n"
-                "\u2022 \u1791\u17bc\u179a\u179f\u17d0\u1796\u17d2\u1791: {phone}\n"
-                "\u2022 \u1780\u1789\u17d2\u1785\u1794\u17cb: {label} ({price_usd})\n\n"
-                "NiMo \u1793\u17b9\u1784\u1796\u17b7\u1793\u17b7\u178f\u17d2\u1799 \u1793\u17b7\u1784\u1794\u1789\u17d2\u1787\u17b6\u1780\u17cb\u1780\u17d2\u1793\u17bb\u1784 *30 \u1793\u17b6\u1791\u17b8* \u23f0\n\n"
-                "\u17a2\u179a\u1782\u17bb\u178e\u1794\u1784\u178a\u17c2\u179b\u1791\u17bb\u1780\u1785\u17b7\u178f\u17d2\u178f NiMo \u2764\ufe0f"
+                "🎉 *ទទួលបានព័ត៌មានគ្រប់គ្រាន់ហើយ!*\n\n"
+                "📋 *សង្ខេបការបញ្ជាទិញ:*\n"
+                "• លេខកូដ: `{order_id}`\n"
+                "• ឈ្មោះ: {name}\n"
+                "• ទូរស័ព្ទ: {phone}\n"
+                "• កញ្ចប់: {label} ({price_usd})\n\n"
+                "NiMo នឹងពិនិត្យ និងបញ្ជាក់ក្នុង *30 នាទី* ⏰\n\n"
+                "អរគុណបងដែលទុកចិត្ត NiMo ❤️"
             ),
             "package_msg": (
-                "\U0001f389 *\u1794\u1784\u1794\u17b6\u1793\u1787\u17d2\u179a\u17be\u179f {label} \u2014 {price_usd}* ({price_riel})\n\n"
-                "\U0001f4f2 *\u179f\u17bc\u1798 Scan QR ABA \u1781\u17b6\u1784\u179b\u17be \u178a\u17be\u1798\u17d2\u1794\u17b8\u1794\u1784\u17cb\u1794\u17d2\u179a\u17b6\u1780\u17cb*\n\n"
-                "\U0001f4b5 *\u1785\u17c6\u1793\u17bd\u1793\u1791\u17b9\u1780\u1794\u17d2\u179a\u17b6\u1780\u17cb: {price_usd}*\n\n"
-                "\u1794\u1793\u17d2\u1791\u17b6\u1794\u17cb\u1796\u17b8\u1795\u17d2\u1791\u17c1\u179a\u1794\u17d2\u179a\u17b6\u1780\u17cb\u17a0\u17be\u1799 \u179f\u17bc\u1798\u1785\u17bb\u1785\u1794\u17ca\u17bc\u178f\u17bb\u1784\u1781\u17b6\u1784\u1780\u17d2\u179a\u17c4\u1798 \U0001f447"
+                "🎉 *បងបានជ្រើស {label} — {price_usd}* ({price_riel})\n\n"
+                "📲 *សូម Scan QR ABA ខាងលើ ដើម្បីបង់ប្រាក់*\n\n"
+                "💵 *ចំនួនទឹកប្រាក់: {price_usd}*\n\n"
+                "បន្ទាប់ពីផ្ទេរប្រាក់ហើយ សូមចុចប៊ូតុងខាងក្រោម 👇"
             ),
         },
     },
@@ -543,438 +623,438 @@ CONTENT = {
     "en": {
         "faq": {
             "q_nimo": {
-                "label": "\U0001f464 Who is NiMo?",
+                "label": "👤 Who is NiMo?",
                 "answer": (
-                    "\U0001f464 *Who is NiMo?*\n\n"
+                    "👤 *Who is NiMo?*\n\n"
                     "NiMo was created from a simple desire:\n\n"
                     "_To contribute something meaningful to the business community in Cambodia._\n\n"
-                    "While neighboring countries have used AI to automate businesses for years \u2014 "
+                    "While neighboring countries have used AI to automate businesses for years — "
                     "many business owners in Cambodia are still doing everything manually every day. "
-                    "Not because they don't want to change \u2014 but because no tool has truly fit them.\n\n"
-                    "NiMo was born to bridge that gap \u2014 "
+                    "Not because they don't want to change — but because no tool has truly fit them.\n\n"
+                    "NiMo was born to bridge that gap — "
                     "helping Cambodian shop owners access AI practically, easily, in their own language."
                 ),
             },
             "q_system": {
-                "label": "\U0001f4ac I don't understand how this system works",
+                "label": "💬 I don't understand how this system works",
                 "answer": (
-                    "\U0001f4ac *How does Cambodia Biz Agent work?*\n\n"
-                    "Simply put: you get *5 AI Employees* \u2014 each does 1 job:\n\n"
-                    "\U0001f50d Market research & competitor analysis\n"
-                    "\U0001f4e3 Create content for FB/TikTok/Instagram\n"
-                    "\U0001f4b0 Write sales pages & close orders\n"
-                    "\U0001f4e6 Auto-receive orders & send delivery notifications\n"
-                    "\U0001f4ca Revenue reports & weekly optimization\n\n"
-                    "You give commands in Khmer or English \u2014 AI works instantly.\n\n"
-                    "No coding needed. \U0001f680"
+                    "💬 *How does Cambodia Biz Agent work?*\n\n"
+                    "Simply put: you get *5 AI Employees* — each does 1 job:\n\n"
+                    "🔍 Market research & competitor analysis\n"
+                    "📣 Create content for FB/TikTok/Instagram\n"
+                    "💰 Write sales pages & close orders\n"
+                    "📦 Auto-receive orders & send delivery notifications\n"
+                    "📊 Revenue reports & weekly optimization\n\n"
+                    "You give commands in Khmer or English — AI works instantly.\n\n"
+                    "No coding needed. 🚀"
                 ),
             },
             "q_different": {
-                "label": "\U0001f19a How is this different from other AI agents?",
+                "label": "🆚 How is this different from other AI agents?",
                 "answer": (
-                    "\U0001f19a *How is Cambodia Biz Agent different from other agents?*\n\n"
-                    "Most AI Agents are built for Western markets \u2014 "
+                    "🆚 *How is Cambodia Biz Agent different from other agents?*\n\n"
+                    "Most AI Agents are built for Western markets — "
                     "English, Stripe payments, US/EU business styles.\n\n"
                     "*Cambodia Biz Agent is different: built specifically for Cambodian business owners.*\n\n"
-                    "\U0001f1f0\U0001f1ed *Language:* Natural Khmer \u2014 not machine translation\n\n"
-                    "\U0001f4b3 *Payments:* ABA Pay, Wing Money, Bakong KHQR \u2014 no international card needed\n\n"
-                    "\U0001f4f1 *Platforms:* Facebook, TikTok, Telegram \u2014 where Cambodian customers buy\n\n"
-                    "\U0001f91d *Support:* NiMo is based in Cambodia, understands the market, gives direct support\n\n"
-                    "Built from the real realities of this market \u2014 not copied from elsewhere."
+                    "🇰🇭 *Language:* Natural Khmer — not machine translation\n\n"
+                    "💳 *Payments:* ABA Pay, Wing Money, Bakong KHQR — no international card needed\n\n"
+                    "📱 *Platforms:* Facebook, TikTok, Telegram — where Cambodian customers buy\n\n"
+                    "🤝 *Support:* NiMo is based in Cambodia, understands the market, gives direct support\n\n"
+                    "Built from the real realities of this market — not copied from elsewhere."
                 ),
             },
             "q_save": {
-                "label": "\U0001f4b0 What will I save?",
+                "label": "💰 What will I save?",
                 "answer": (
-                    "\U0001f4b0 *What specifically will I save?*\n\n"
-                    "What you save most \u2014 not money. *Time.*\n\n"
+                    "💰 *What specifically will I save?*\n\n"
+                    "What you save most — not money. *Time.*\n\n"
                     "Average shop owners spend ~3 hours/day on repetitive tasks: "
                     "writing captions, replying messages, posting, compiling orders.\n\n"
-                    "*3 hours \xd7 30 days = 90 hours/month* \u2014 Cambodia Biz Agent handles all that.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "On money \u2014 real numbers:\n\n"
-                    "\U0001f50d Market research: $100\u2013200/time\n"
-                    "\U0001f4e3 Content writing: $50\u2013150/month\n"
-                    "\U0001f4ac Order closing: $200\u2013300/month\n"
-                    "\U0001f4e6 Order processing: $150\u2013250/month\n"
-                    "\U0001f4ca Reporting: $100\u2013200/month\n\n"
-                    "*Hiring people: ~$700\u20131,200/month*\n\n"
+                    "*3 hours × 30 days = 90 hours/month* — Cambodia Biz Agent handles all that.\n\n"
+                    "─────────\n\n"
+                    "On money — real numbers:\n\n"
+                    "🔍 Market research: $100–200/time\n"
+                    "📣 Content writing: $50–150/month\n"
+                    "💬 Order closing: $200–300/month\n"
+                    "📦 Order processing: $150–250/month\n"
+                    "📊 Reporting: $100–200/month\n\n"
+                    "*Hiring people: ~$700–1,200/month*\n\n"
                     "Cambodia Biz Agent: one-time only\n"
-                    "\U0001f7e6 Basic $97 \xb7 \u2b50 Pro $297 \xb7 \U0001f7e1 VIP $597\n\n"
-                    "Year 1: save *$8,000\u201314,000* compared to hiring \U0001f4b0"
+                    "🟦 Basic $97 · ⭐ Pro $297 · 🟡 VIP $597\n\n"
+                    "Year 1: save *$8,000–14,000* compared to hiring 💰"
                 ),
             },
             "q_location": {
-                "label": "\U0001f3e2 Where is NiMo's office?",
+                "label": "🏢 Where is NiMo's office?",
                 "answer": (
-                    "\U0001f3e2 *Where is NiMo's office?*\n\n"
-                    "NiMo operates fully online \u2014 no physical office. "
+                    "🏢 *Where is NiMo's office?*\n\n"
+                    "NiMo operates fully online — no physical office. "
                     "This is a modern digital business model, like buying an app or online course "
-                    "\u2014 you don't need to know where the office is to use it.\n\n"
+                    "— you don't need to know where the office is to use it.\n\n"
                     "What matters more than an address: NiMo offers a *30-day 100% money-back guarantee* "
-                    "if you're not satisfied. That's a clearer commitment than any address. \u2764\ufe0f"
+                    "if you're not satisfied. That's a clearer commitment than any address. ❤️"
                 ),
             },
             "q_price": {
-                "label": "\U0001f4b5 How much does Cambodia Biz Agent cost?",
+                "label": "💵 How much does Cambodia Biz Agent cost?",
                 "answer": (
-                    "\U0001f4b5 *How much does Cambodia Biz Agent cost? Monthly fees?*\n\n"
-                    "Buy once \u2014 use forever. 3 plans to choose from:\n\n"
-                    "\U0001f7e6 *Basic $97* (\u2248 400,000 Riel)\n"
-                    "First-time trial \u2014 lowest risk\n\n"
-                    "\u2b50 *Pro $297* (\u2248 1,200,000 Riel)\n"
+                    "💵 *How much does Cambodia Biz Agent cost? Monthly fees?*\n\n"
+                    "Buy once — use forever. 3 plans to choose from:\n\n"
+                    "🟦 *Basic $97* (≈ 400,000 Riel)\n"
+                    "First-time trial — lowest risk\n\n"
+                    "⭐ *Pro $297* (≈ 1,200,000 Riel)\n"
                     "Full automation 24/7\n\n"
-                    "\U0001f7e1 *VIP $597* (\u2248 2,400,000 Riel)\n"
-                    "NiMo installs directly via Zoom \u2014 done and ready to use immediately\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
+                    "🟡 *VIP $597* (≈ 2,400,000 Riel)\n"
+                    "NiMo installs directly via Zoom — done and ready to use immediately\n\n"
+                    "─────────\n\n"
                     "Only ongoing cost: Claude Pro account ~$20/month.\n\n"
                     "*No hidden fees. No renewals. No surprises.*"
                 ),
             },
             "q_which_plan": {
-                "label": "\U0001f914 I don't know which plan fits me",
+                "label": "🤔 I don't know which plan fits me",
                 "answer": (
-                    "\U0001f914 *Which plan fits your shop?*\n\n"
-                    "\U0001f7e6 *Basic $97* \u2014 New to AI, want to try first\n"
-                    "\u2192 5 AI Employees + Khmer guide + 30-day support\n\n"
-                    "\u2b50 *Pro $297* \u2014 Shop running, want full automation 24/7\n"
-                    "\u2192 Chatbot + auto-post + auto-booking\n\n"
-                    "\U0001f7e1 *VIP $597* \u2014 Don't want to install yourself\n"
-                    "\u2192 NiMo installs everything, ready to use, 90-day support\n\n"
-                    "Not sure? Tell NiMo about your shop \u2014 we'll recommend the right plan in 5 mins \U0001f447"
+                    "🤔 *Which plan fits your shop?*\n\n"
+                    "🟦 *Basic $97* — New to AI, want to try first\n"
+                    "→ 5 AI Employees + Khmer guide + 30-day support\n\n"
+                    "⭐ *Pro $297* — Shop running, want full automation 24/7\n"
+                    "→ Chatbot + auto-post + auto-booking\n\n"
+                    "🟡 *VIP $597* — Don't want to install yourself\n"
+                    "→ NiMo installs everything, ready to use, 90-day support\n\n"
+                    "Not sure? Tell NiMo about your shop — we'll recommend the right plan in 5 mins 👇"
                 ),
             },
             "q_worth": {
-                "label": "\U0001f48e Is $297 worth it?",
+                "label": "💎 Is $297 worth it?",
                 "answer": (
-                    "\U0001f48e *Is $297 (or whatever I spend) worth it?*\n\n"
+                    "💎 *Is $297 (or whatever I spend) worth it?*\n\n"
                     "Let the numbers answer.\n\n"
-                    "*Inbox staff in Cambodia:* $200\u2013300/month\n"
-                    "\u2192 8 hours/day. Takes holidays. Asks for raises. Gets sick.\n\n"
-                    "*Cambodia Biz Agent Pro $297* \u2014 one-time\n"
-                    "\u2192 24/7. No holidays. No raises. Never quits.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
+                    "*Inbox staff in Cambodia:* $200–300/month\n"
+                    "→ 8 hours/day. Takes holidays. Asks for raises. Gets sick.\n\n"
+                    "*Cambodia Biz Agent Pro $297* — one-time\n"
+                    "→ 24/7. No holidays. No raises. Never quits.\n\n"
+                    "─────────\n\n"
                     "$297 = less than one month of inbox staff.\n\n"
                     "But Cambodia Biz Agent works for you *forever*.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "If AI helps you close just *5 extra orders/month* \u2014 $297 already paid for itself."
+                    "─────────\n\n"
+                    "If AI helps you close just *5 extra orders/month* — $297 already paid for itself."
                 ),
             },
             "q_warranty": {
-                "label": "\U0001f6e1\ufe0f Is there a warranty / refund policy?",
+                "label": "🛡️ Is there a warranty / refund policy?",
                 "answer": (
-                    "\U0001f6e1\ufe0f *Is there a warranty? Can I get a refund?*\n\n"
-                    "Yes \u2014 and NiMo is confident about this.\n\n"
-                    "*30-day guarantee \u2014 100% refund, no questions asked.*\n\n"
+                    "🛡️ *Is there a warranty? Can I get a refund?*\n\n"
+                    "Yes — and NiMo is confident about this.\n\n"
+                    "*30-day guarantee — 100% refund, no questions asked.*\n\n"
                     "Buy Cambodia Biz Agent. Follow the guide for 30 days. "
-                    "If the system doesn't work as NiMo described \u2014 "
+                    "If the system doesn't work as NiMo described — "
                     "message NiMo on Telegram. Refund within 24 hours.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*The risk is on NiMo. Not on you.* \u2764\ufe0f"
+                    "─────────\n\n"
+                    "*The risk is on NiMo. Not on you.* ❤️"
                 ),
             },
             "q_tech": {
-                "label": "\U0001f630 I'm afraid I can't install it",
+                "label": "😰 I'm afraid I can't install it",
                 "answer": (
-                    "\U0001f630 *Not tech-savvy \u2014 can I still install it?*\n\n"
+                    "😰 *Not tech-savvy — can I still install it?*\n\n"
                     "Yes! Here's why:\n\n"
-                    "\u2705 Step-by-step guide in Khmer with images\n"
-                    "\u2705 Video tutorials to follow\n"
-                    "\u2705 Bot support 24/7\n"
-                    "\u2705 NiMo personally answers when needed\n\n"
-                    "VIP plan: NiMo installs it with you via Zoom in 2 hours \u2014 "
-                    "you just watch and click. \U0001f3af"
+                    "✅ Step-by-step guide in Khmer with images\n"
+                    "✅ Video tutorials to follow\n"
+                    "✅ Bot support 24/7\n"
+                    "✅ NiMo personally answers when needed\n\n"
+                    "VIP plan: NiMo installs it with you via Zoom in 2 hours — "
+                    "you just watch and click. 🎯"
                 ),
             },
             "q_time": {
-                "label": "\u23f0 How long does setup take?",
+                "label": "⏰ How long does setup take?",
                 "answer": (
-                    "\u23f0 *How long before I can start using it?*\n\n"
-                    "*Basic & Pro:* Self-install following the guide ~2\u20133 hours \u2014 "
+                    "⏰ *How long before I can start using it?*\n\n"
+                    "*Basic & Pro:* Self-install following the guide ~2–3 hours — "
                     "do it in the evening or when free, no need to stop selling. "
                     "Day 2 you can create content. Day 3 the system runs on its own.\n\n"
-                    "*VIP:* Just 1 Zoom session 2 hours with NiMo \u2014 "
+                    "*VIP:* Just 1 Zoom session 2 hours with NiMo — "
                     "you watch, NiMo does everything, tests and hands over. Done.\n\n"
-                    "Many NiMo customers buy in the morning \u2014 by evening they already have their first content to post \U0001f680"
+                    "Many NiMo customers buy in the morning — by evening they already have their first content to post 🚀"
                 ),
             },
             "q_device": {
-                "label": "\U0001f4f1 What devices do I need?",
+                "label": "📱 What devices do I need?",
                 "answer": (
-                    "\U0001f4f1 *What devices do I need to use this?*\n\n"
-                    "Both computer and smartphone work \u2014 use whatever you have \U0001f60a\n\n"
-                    "\U0001f4bb *Computer:* Recommended for initial setup and viewing reports \u2014 bigger screen is easier.\n\n"
-                    "\U0001f4f1 *Smartphone only:* After NiMo helps with setup, you can run everything by phone \u2014 "
+                    "📱 *What devices do I need to use this?*\n\n"
+                    "Both computer and smartphone work — use whatever you have 😊\n\n"
+                    "💻 *Computer:* Recommended for initial setup and viewing reports — bigger screen is easier.\n\n"
+                    "📱 *Smartphone only:* After NiMo helps with setup, you can run everything by phone — "
                     "reply to customers, post content, check revenue, all on app.\n\n"
-                    "If it can scroll Facebook smoothly \u2014 it can run Cambodia Biz Agent. No upgrades needed."
+                    "If it can scroll Facebook smoothly — it can run Cambodia Biz Agent. No upgrades needed."
                 ),
             },
             "q_internet": {
-                "label": "\U0001f310 Do I need fast internet?",
+                "label": "🌐 Do I need fast internet?",
                 "answer": (
-                    "\U0001f310 *Do I need high-speed internet?*\n\n"
-                    "No \u2014 just internet good enough for Facebook and Telegram.\n\n"
-                    "Home WiFi or 4G both work fine. The system runs on cloud servers \u2014 "
-                    "your device only needs to send commands, not do heavy processing \U0001f680"
+                    "🌐 *Do I need high-speed internet?*\n\n"
+                    "No — just internet good enough for Facebook and Telegram.\n\n"
+                    "Home WiFi or 4G both work fine. The system runs on cloud servers — "
+                    "your device only needs to send commands, not do heavy processing 🚀"
                 ),
             },
             "q_team": {
-                "label": "\U0001f465 Can my staff use it too?",
+                "label": "👥 Can my staff use it too?",
                 "answer": (
-                    "\U0001f465 *Can my shop staff use it together?*\n\n"
-                    "Absolutely! NiMo designed Cambodia Biz Agent for the whole shop \u2014 not just one person \U0001f60a\n\n"
-                    "\u2705 Inbox staff use AI to reply customers faster\n"
-                    "\u2705 Content staff use AI to create daily posts\n"
-                    "\u2705 Managers use AI to view revenue reports\n\n"
-                    "Everyone accesses one account \u2014 easy collaboration, no user limit.\n\n"
-                    "\U0001f4a1 Claude Pro $20/month can be shared across the whole team \u2014 split the cost, no need for individual accounts."
+                    "👥 *Can my shop staff use it together?*\n\n"
+                    "Absolutely! NiMo designed Cambodia Biz Agent for the whole shop — not just one person 😊\n\n"
+                    "✅ Inbox staff use AI to reply customers faster\n"
+                    "✅ Content staff use AI to create daily posts\n"
+                    "✅ Managers use AI to view revenue reports\n\n"
+                    "Everyone accesses one account — easy collaboration, no user limit.\n\n"
+                    "💡 Claude Pro $20/month can be shared across the whole team — split the cost, no need for individual accounts."
                 ),
             },
             "q_data": {
-                "label": "\U0001f512 Will my shop data be leaked?",
+                "label": "🔒 Will my shop data be leaked?",
                 "answer": (
-                    "\U0001f512 *Will my shop data be leaked?*\n\n"
-                    "NiMo understands your concern \u2014 and here's NiMo's clear commitment: your data is completely safe.\n\n"
-                    "\u2705 *Your data belongs to you:* Customers, orders, messages \u2014 all stored in your own account, no one else can access.\n\n"
-                    "\u2705 *NiMo doesn't touch your shop data:* NiMo doesn't collect, sell, or share your data with anyone.\n\n"
-                    "\u2705 *International security standards:* Built on Anthropic's platform (US) \u2014 same security standard as banks.\n\n"
-                    "Your shop \u2192 your data \u2192 your control. NiMo keeps nothing. \u2764\ufe0f"
+                    "🔒 *Will my shop data be leaked?*\n\n"
+                    "NiMo understands your concern — and here's NiMo's clear commitment: your data is completely safe.\n\n"
+                    "✅ *Your data belongs to you:* Customers, orders, messages — all stored in your own account, no one else can access.\n\n"
+                    "✅ *NiMo doesn't touch your shop data:* NiMo doesn't collect, sell, or share your data with anyone.\n\n"
+                    "✅ *International security standards:* Built on Anthropic's platform (US) — same security standard as banks.\n\n"
+                    "Your shop → your data → your control. NiMo keeps nothing. ❤️"
                 ),
             },
             "q_after_warranty": {
-                "label": "\U0001f91d What happens after the warranty?",
+                "label": "🤝 What happens after the warranty?",
                 "answer": (
-                    "\U0001f91d *What support after the 30-day warranty?*\n\n"
-                    "The 30-day warranty is just the refund policy \u2014 NiMo supports you with no time limit \U0001f60a\n\n"
-                    "\u2705 Message NiMo on Telegram anytime \u2014 bugs, advice, optimization, NiMo is there.\n\n"
-                    "\u2705 Join community group \u2014 learn from other shop owners using Cambodia Biz Agent.\n\n"
-                    "\u2705 Receive updates when NiMo upgrades the system \u2014 completely free.\n\n"
-                    "NiMo sells you the system \u2014 but doesn't abandon you after receiving payment. \u2764\ufe0f"
+                    "🤝 *What support after the 30-day warranty?*\n\n"
+                    "The 30-day warranty is just the refund policy — NiMo supports you with no time limit 😊\n\n"
+                    "✅ Message NiMo on Telegram anytime — bugs, advice, optimization, NiMo is there.\n\n"
+                    "✅ Join community group — learn from other shop owners using Cambodia Biz Agent.\n\n"
+                    "✅ Receive updates when NiMo upgrades the system — completely free.\n\n"
+                    "NiMo sells you the system — but doesn't abandon you after receiving payment. ❤️"
                 ),
             },
             "q_update": {
-                "label": "\U0001f199 Are there updates?",
+                "label": "🆙 Are there updates?",
                 "answer": (
-                    "\U0001f199 *Are there future updates/upgrades? Do they cost extra?*\n\n"
-                    "Regular updates \u2014 completely free for existing customers \U0001f381\n\n"
+                    "🆙 *Are there future updates/upgrades? Do they cost extra?*\n\n"
+                    "Regular updates — completely free for existing customers 🎁\n\n"
                     "NiMo continually improves Cambodia Biz Agent based on real feedback. When there are:\n\n"
-                    "\u2705 New features\n"
-                    "\u2705 Better AI commands\n"
-                    "\u2705 Speed & effectiveness improvements\n\n"
-                    "\u2192 You receive updates automatically via group, no extra payment.\n\n"
-                    "Buy once \u2014 get upgraded forever."
+                    "✅ New features\n"
+                    "✅ Better AI commands\n"
+                    "✅ Speed & effectiveness improvements\n\n"
+                    "→ You receive updates automatically via group, no extra payment.\n\n"
+                    "Buy once — get upgraded forever."
                 ),
             },
             "q_community": {
-                "label": "\U0001f465 Is there a community group?",
+                "label": "👥 Is there a community group?",
                 "answer": (
-                    "\U0001f465 *Does NiMo have a community group?*\n\n"
-                    "Yes! This is one of the values NiMo is most proud of \U0001f49b\n\n"
+                    "👥 *Does NiMo have a community group?*\n\n"
+                    "Yes! This is one of the values NiMo is most proud of 💛\n\n"
                     "After purchasing, NiMo adds you to a *private Telegram community* where you:\n\n"
-                    "\u2705 Meet other Cambodian shop owners \u2014 share real daily experiences.\n\n"
-                    "\u2705 Learn more effective AI usage from those who went before.\n\n"
-                    "\u2705 Receive new tips & AI commands NiMo updates weekly.\n\n"
-                    "\u2705 Get quick answers \u2014 NiMo and community are ready to help.\n\n"
-                    "You never go alone \u2014 the whole community goes with you \u2764\ufe0f"
+                    "✅ Meet other Cambodian shop owners — share real daily experiences.\n\n"
+                    "✅ Learn more effective AI usage from those who went before.\n\n"
+                    "✅ Receive new tips & AI commands NiMo updates weekly.\n\n"
+                    "✅ Get quick answers — NiMo and community are ready to help.\n\n"
+                    "You never go alone — the whole community goes with you ❤️"
                 ),
             },
             "q_competitor": {
-                "label": "\u2694\ufe0f What if competitors use it too?",
+                "label": "⚔️ What if competitors use it too?",
                 "answer": (
-                    "\u2694\ufe0f *If competitors use it too, do I still have an advantage?*\n\n"
-                    "Yes \u2014 even a bigger advantage if you start earlier.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
+                    "⚔️ *If competitors use it too, do I still have an advantage?*\n\n"
+                    "Yes — even a bigger advantage if you start earlier.\n\n"
+                    "─────────\n\n"
                     "*Right now most Cambodian shop owners don't use AI.* "
                     "Every day you wait is a day competitors get ahead.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*Same tool \u2260 same results.*\n\n"
-                    "Two shops using Cambodia Biz Agent \u2014 but:\n"
-                    "\u2022 Different products\n"
-                    "\u2022 Different brand styles\n"
-                    "\u2022 Different customer approaches\n\n"
-                    "AI learns your shop's specific characteristics \u2014 nobody has an exact copy.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
+                    "─────────\n\n"
+                    "*Same tool ≠ same results.*\n\n"
+                    "Two shops using Cambodia Biz Agent — but:\n"
+                    "• Different products\n"
+                    "• Different brand styles\n"
+                    "• Different customer approaches\n\n"
+                    "AI learns your shop's specific characteristics — nobody has an exact copy.\n\n"
+                    "─────────\n\n"
                     "Real advantage = using the tool *earlier, better, more consistently*."
                 ),
             },
             "q_think": {
-                "label": "\U0001f914 Let me think about it",
+                "label": "🤔 Let me think about it",
                 "answer": (
-                    "\U0001f914 *Let me think about it*\n\n"
-                    "Of course \u2014 this is a business decision \U0001f60a\n\n"
+                    "🤔 *Let me think about it*\n\n"
+                    "Of course — this is a business decision 😊\n\n"
                     "But before thinking, 3 things NiMo wants you to know:\n\n"
-                    "*One \u2014 Current price is early bird.*\n"
+                    "*One — Current price is early bird.*\n"
                     "After launch, price goes up. Buying today = best price.\n\n"
-                    "*Two \u2014 30-day 100% money-back guarantee.*\n"
-                    "You're trying with virtually zero real risk. Not happy \u2192 refund.\n\n"
-                    "*Three \u2014 Every day you wait is a day lost.*\n"
-                    "Not money \u2014 but time, orders, opportunities. Those can't be refunded.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "Need more info to decide? NiMo is here \U0001f60a"
+                    "*Two — 30-day 100% money-back guarantee.*\n"
+                    "You're trying with virtually zero real risk. Not happy → refund.\n\n"
+                    "*Three — Every day you wait is a day lost.*\n"
+                    "Not money — but time, orders, opportunities. Those can't be refunded.\n\n"
+                    "─────────\n\n"
+                    "Need more info to decide? NiMo is here 😊"
                 ),
             },
             "q_try": {
-                "label": "\U0001f9ea I want to try before buying",
+                "label": "🧪 I want to try before buying",
                 "answer": (
-                    "\U0001f9ea *I want to try before buying*\n\n"
-                    "NiMo understands \u2014 and doesn't blame that \U0001f60a\n\n"
+                    "🧪 *I want to try before buying*\n\n"
+                    "NiMo understands — and doesn't blame that 😊\n\n"
                     "But think: trying before buying means you want real results, on your real shop, with your real products.\n\n"
                     "*There's no way to do that without actually starting.*\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "That's why NiMo has *Basic $97* \u2014 this is essentially a \"try with refund\" option:\n\n"
-                    "\u2705 Full 5 AI Employees experience\n"
-                    "\u2705 Run on your real shop\n"
-                    "\u2705 See real results in 30 days\n"
-                    "\u2705 Not satisfied \u2192 100% refund\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "*The real risk isn't buying. The real risk is continuing alone \u2014 when there's another way.*"
+                    "─────────\n\n"
+                    "That's why NiMo has *Basic $97* — this is essentially a \"try with refund\" option:\n\n"
+                    "✅ Full 5 AI Employees experience\n"
+                    "✅ Run on your real shop\n"
+                    "✅ See real results in 30 days\n"
+                    "✅ Not satisfied → 100% refund\n\n"
+                    "─────────\n\n"
+                    "*The real risk isn't buying. The real risk is continuing alone — when there's another way.*"
                 ),
             },
             "q_claude_pro": {
-                "label": "\U0001f4b3 What is Claude Pro $20/month?",
+                "label": "💳 What is Claude Pro $20/month?",
                 "answer": (
-                    "\U0001f4b3 *What is Claude Pro $20/month? Is it required?*\n\n"
-                    "Cambodia Biz Agent runs on Claude AI (by Anthropic \u2014 US). "
-                    "To use it, you need a Claude Pro account at *$20/month* \u2014 "
+                    "💳 *What is Claude Pro $20/month? Is it required?*\n\n"
+                    "Cambodia Biz Agent runs on Claude AI (by Anthropic — US). "
+                    "To use it, you need a Claude Pro account at *$20/month* — "
                     "paid directly to Anthropic, not through NiMo.\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
+                    "─────────\n\n"
                     "But look at the real cost:\n\n"
-                    "\u2705 $20/month = 1 employee working 24/7, no holidays, no raises\n"
-                    "\u2705 All 5 AI Agents run on 1 account \u2014 whole team shares\n"
-                    "\u2705 Cancel anytime \u2014 no commitment\n\n"
-                    "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n"
-                    "Inbox staff in Cambodia = $200\u2013300/month.\n"
-                    "Claude Pro = $20/month. *Save $180\u2013280 every month.*"
+                    "✅ $20/month = 1 employee working 24/7, no holidays, no raises\n"
+                    "✅ All 5 AI Agents run on 1 account — whole team shares\n"
+                    "✅ Cancel anytime — no commitment\n\n"
+                    "─────────\n\n"
+                    "Inbox staff in Cambodia = $200–300/month.\n"
+                    "Claude Pro = $20/month. *Save $180–280 every month.*"
                 ),
             },
             "q_riel": {
-                "label": "\U0001f4b5 Can I pay in Riel?",
+                "label": "💵 Can I pay in Riel?",
                 "answer": (
-                    "\U0001f4b5 *Can I pay in Riel?*\n\n"
-                    "Yes! Transfer in Riel normally \u2014 "
+                    "💵 *Can I pay in Riel?*\n\n"
+                    "Yes! Transfer in Riel normally — "
                     "ABA Bank automatically converts to USD.\n\n"
-                    "\U0001f7e6 *Basic $97* \u2248 400,000 Riel\n"
-                    "\u2b50 *Pro $297* \u2248 1,200,000 Riel\n"
-                    "\U0001f7e1 *VIP $597* \u2248 2,400,000 Riel"
+                    "🟦 *Basic $97* ≈ 400,000 Riel\n"
+                    "⭐ *Pro $297* ≈ 1,200,000 Riel\n"
+                    "🟡 *VIP $597* ≈ 2,400,000 Riel"
                 ),
             },
             "q_industry": {
-                "label": "\U0001f6cd\ufe0f Does my business type work?",
+                "label": "🛍️ Does my business type work?",
                 "answer": (
-                    "\U0001f6cd\ufe0f *I sell [food/beauty/fashion/services]\u2026 will it work?*\n\n"
+                    "🛍️ *I sell [food/beauty/fashion/services]… will it work?*\n\n"
                     "NiMo's short answer: *if you sell online in Cambodia, your shop works.*\n\n"
                     "NiMo has tested Cambodia Biz Agent across many industries:\n\n"
-                    "\U0001f457 Fashion & accessories\n"
-                    "\U0001f484 Beauty & skincare\n"
-                    "\U0001f371 Food & specialty\n"
-                    "\U0001f4da Courses & consulting\n"
-                    "\U0001f486 Spa, salon, studio\n"
-                    "\U0001f3e0 Furniture & home goods\n"
-                    "\U0001f338 Flowers & gifts\n\n"
-                    "AI learns according to your shop's products and style \u2014 not a rigid formula.\n\n"
-                    "Not sure? Tell NiMo your specific industry \u2014 free consultation \U0001f447"
+                    "👗 Fashion & accessories\n"
+                    "💄 Beauty & skincare\n"
+                    "🍱 Food & specialty\n"
+                    "📚 Courses & consulting\n"
+                    "💆 Spa, salon, studio\n"
+                    "🏠 Furniture & home goods\n"
+                    "🌸 Flowers & gifts\n\n"
+                    "AI learns according to your shop's products and style — not a rigid formula.\n\n"
+                    "Not sure? Tell NiMo your specific industry — free consultation 👇"
                 ),
             },
             "q_delivery": {
-                "label": "\U0001f4e6 How do I receive after paying?",
+                "label": "📦 How do I receive after paying?",
                 "answer": (
-                    "\U0001f4e6 *After transferring, how do I receive the product?*\n\n"
-                    "Simple \u2014 just 4 steps:\n\n"
-                    "*Step 1 \u2014 Transfer*\n"
-                    "Choose a plan \u2192 transfer to the info NiMo provides\n\n"
-                    "*Step 2 \u2014 Send confirmation*\n"
-                    "Screenshot the transfer \u2192 send with name + phone + chosen plan to bot\n\n"
-                    "*Step 3 \u2014 NiMo confirms & delivers*\n"
+                    "📦 *After transferring, how do I receive the product?*\n\n"
+                    "Simple — just 4 steps:\n\n"
+                    "*Step 1 — Transfer*\n"
+                    "Choose a plan → transfer to the info NiMo provides\n\n"
+                    "*Step 2 — Send confirmation*\n"
+                    "Screenshot the transfer → send with name + phone + chosen plan to bot\n\n"
+                    "*Step 3 — NiMo confirms & delivers*\n"
                     "NiMo verifies and sends the full product within 30 minutes\n\n"
-                    "*Step 4 \u2014 Receive & begin*\n"
-                    "Get the Kit + guide PDF + videos + support group \u2014 start setup \U0001f680\n\n"
+                    "*Step 4 — Receive & begin*\n"
+                    "Get the Kit + guide PDF + videos + support group — start setup 🚀\n\n"
                     "*VIP:* After receiving the Kit, NiMo contacts you to schedule a Zoom session."
                 ),
             },
         },
         "cats": {
             "cat_intro": {
-                "label": "\U0001f50d Learn about Cambodia Biz Agent",
+                "label": "🔍 Learn about Cambodia Biz Agent",
                 "questions": ["q_nimo", "q_system", "q_different", "q_save", "q_location"],
             },
             "cat_price": {
-                "label": "\U0001f4b0 Pricing & Plans",
+                "label": "💰 Pricing & Plans",
                 "questions": ["q_price", "q_which_plan", "q_worth", "q_warranty"],
             },
             "cat_tech": {
-                "label": "\U0001f6e0\ufe0f Setup & Technology",
+                "label": "🛠️ Setup & Technology",
                 "questions": ["q_tech", "q_time", "q_device", "q_internet", "q_team"],
             },
             "cat_support": {
-                "label": "\U0001f512 Warranty & Support",
+                "label": "🔒 Warranty & Support",
                 "questions": ["q_data", "q_after_warranty", "q_update", "q_community"],
             },
             "cat_doubt": {
-                "label": "\U0001f914 Still Hesitating",
+                "label": "🤔 Still Hesitating",
                 "questions": ["q_competitor", "q_think", "q_try"],
             },
             "cat_buy": {
-                "label": "\U0001f6cd\ufe0f Buying",
+                "label": "🛍️ Buying",
                 "questions": ["q_claude_pro", "q_riel", "q_industry", "q_delivery"],
             },
         },
         "s": {
             "welcome": (
-                "\U0001f44b Hello! I'm the assistant of *NiMo Team*.\n\n"
+                "👋 Hello! I'm the assistant of *NiMo Team*.\n\n"
                 "What are you wondering about *Cambodia Biz Agent*?\n"
-                "Choose a question below \u2014 I'll answer right away \U0001f447"
+                "Choose a question below — I'll answer right away 👇"
             ),
             "choose_cat":       "Choose a question:",
             "buy_title": (
-                "\U0001f389 *Great! Which plan do you want?*\n\n"
-                "\U0001f7e6 *Basic $97* \u2014 Try it first\n"
-                "\u2b50 *Pro $297* \u2014 Full automation 24/7\n"
-                "\U0001f7e1 *VIP $597* \u2014 NiMo installs it for you\n\n"
-                "Choose a plan \U0001f447"
+                "🎉 *Great! Which plan do you want?*\n\n"
+                "🟦 *Basic $97* — Try it first\n"
+                "⭐ *Pro $297* — Full automation 24/7\n"
+                "🟡 *VIP $597* — NiMo installs it for you\n\n"
+                "Choose a plan 👇"
             ),
-            "buy_btn":          "\U0001f4b3 I WANT TO BUY NOW",
-            "consult_btn":      "\U0001f4ac Chat directly with NiMo",
-            "back_btn":         "\u2b05\ufe0f Back to main menu",
-            "back_cat":         "\u2b05\ufe0f Other questions",
-            "unsure_btn":       "\U0001f914 I'm not sure \u2014 need advice",
+            "buy_btn":          "💳 I WANT TO BUY NOW",
+            "consult_btn":      "💬 Chat directly with NiMo",
+            "back_btn":         "⬅️ Back to main menu",
+            "back_cat":         "⬅️ Other questions",
+            "unsure_btn":       "🤔 I'm not sure — need advice",
             "consult_msg": (
-                f"\U0001f4ac <b>Hi! NiMo is happy to help you</b> \u2764\ufe0f\n\n"
+                f"💬 <b>Hi! NiMo is happy to help you</b> ❤️\n\n"
                 f"Click the link below to chat directly with our advisor:\n\n"
-                f"\U0001f449 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
-                f"<i>After consulting, come back here to place your order with /start</i> \U0001f6d2"
+                f"👉 <a href='https://t.me/{STAFF_USERNAME}'>Chat with NiMo Advisor</a>\n\n"
+                f"<i>After consulting, come back here to place your order with /start</i> 🛒"
             ),
-            "end_consult_btn":  "\U0001f51a End consultation \u2014 back to menu",
-            "end_consult_msg":  "\u2705 Consultation ended. Thank you \u2764\ufe0f\n\nType /start to open the menu again.",
-            "confirm_paid_btn": "\u2705 I have transferred \u2014 send receipt",
-            "ask_more_btn":     "\u2753 I have more questions",
-            "view_payment_btn": "\U0001f4b3 View payment details",
-            "unknown_msg":      "I received your message \u2764\ufe0f\n\nWhat would you like to do?",
-            "ask_bill":         "\U0001f4f8 *Step 1/3: Send payment receipt*\n\nPlease *screenshot* the bank transfer confirmation \U0001f447",
-            "need_photo":       "\u26a0\ufe0f Please send a *photo* of your receipt \U0001f4f8",
-            "ask_name":         "\u2705 Receipt received!\n\n\U0001f464 *Step 2/3: Full name*\n\nPlease enter your full name:",
-            "need_text":        "\u26a0\ufe0f Please enter text.",
-            "ask_phone":        "\u2705 Name received!\n\n\U0001f4f1 *Step 3/3: Phone number*\n\nPlease enter your phone number:",
+            "end_consult_btn":  "🔚 End consultation — back to menu",
+            "end_consult_msg":  "✅ Consultation ended. Thank you ❤️\n\nType /start to open the menu again.",
+            "confirm_paid_btn": "✅ I have transferred — send receipt",
+            "ask_more_btn":     "❓ I have more questions",
+            "view_payment_btn": "💳 View payment details",
+            "unknown_msg":      "I received your message ❤️\n\nWhat would you like to do?",
+            "ask_bill":         "📸 *Step 1/3: Send payment receipt*\n\nPlease *screenshot* the bank transfer confirmation 👇",
+            "need_photo":       "⚠️ Please send a *photo* of your receipt 📸",
+            "ask_name":         "✅ Receipt received!\n\n👤 *Step 2/3: Full name*\n\nPlease enter your full name:",
+            "need_text":        "⚠️ Please enter text.",
+            "ask_phone":        "✅ Name received!\n\n📱 *Step 3/3: Phone number*\n\nPlease enter your phone number:",
             "complete_msg": (
-                "\U0001f389 *All information received!*\n\n"
-                "\U0001f4cb *Order summary:*\n"
-                "\u2022 Order ID: `{order_id}`\n"
-                "\u2022 Name: {name}\n"
-                "\u2022 Phone: {phone}\n"
-                "\u2022 Plan: {label} ({price_usd})\n\n"
-                "NiMo will verify and confirm within *30 minutes* \u23f0\n\n"
-                "Thank you for trusting NiMo \u2764\ufe0f"
+                "🎉 *All information received!*\n\n"
+                "📋 *Order summary:*\n"
+                "• Order ID: `{order_id}`\n"
+                "• Name: {name}\n"
+                "• Phone: {phone}\n"
+                "• Plan: {label} ({price_usd})\n\n"
+                "NiMo will verify and confirm within *30 minutes* ⏰\n\n"
+                "Thank you for trusting NiMo ❤️"
             ),
             "package_msg": (
-                "\U0001f389 *You selected {label} \u2014 {price_usd}* ({price_riel})\n\n"
-                "\U0001f4f2 *Scan the ABA QR code above to pay*\n\n"
-                "\U0001f4b5 *Amount: {price_usd}*\n\n"
-                "After transferring, tap the button below to send your receipt \U0001f447"
+                "🎉 *You selected {label} — {price_usd}* ({price_riel})\n\n"
+                "📲 *Scan the ABA QR code above to pay*\n\n"
+                "💵 *Amount: {price_usd}*\n\n"
+                "After transferring, tap the button below to send your receipt 👇"
             ),
         },
     },
 }
 
-# \u2500\u2500\u2500 HELPERS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── HELPERS ─────────────────────────────────────────────────────────────────
 
 def get_lang(context) -> str:
     return context.user_data.get("lang", "km")
@@ -982,12 +1062,12 @@ def get_lang(context) -> str:
 def C(context):
     return CONTENT[get_lang(context)]
 
-# \u2500\u2500\u2500 KEYBOARDS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── KEYBOARDS ───────────────────────────────────────────────────────────────
 
 def lang_keyboard():
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("\U0001f1f0\U0001f1ed \u1797\u17b6\u179f\u17b6\u1781\u17d2\u1798\u17c2\u179a", callback_data="lang_km"),
-        InlineKeyboardButton("\U0001f1ec\U0001f1e7 English",    callback_data="lang_en"),
+        InlineKeyboardButton("🇰🇭 ភាសាខ្មែរ", callback_data="lang_km"),
+        InlineKeyboardButton("🇬🇧 English",    callback_data="lang_en"),
     ]])
 
 def main_menu_keyboard(context):
@@ -1023,9 +1103,9 @@ def after_answer_keyboard(cat_id, context):
 def buy_keyboard(context):
     s = C(context)["s"]
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("\U0001f7e6 Basic $97  (\u2248 400,000 Riel)",   callback_data="buy_basic")],
-        [InlineKeyboardButton("\u2b50 Pro $297   (\u2248 1,200,000 Riel)", callback_data="buy_pro")],
-        [InlineKeyboardButton("\U0001f7e1 VIP $597  (\u2248 2,400,000 Riel)",  callback_data="buy_vip")],
+        [InlineKeyboardButton("🟦 Basic $97  (≈ 400,000 Riel)",   callback_data="buy_basic")],
+        [InlineKeyboardButton("⭐ Pro $297   (≈ 1,200,000 Riel)", callback_data="buy_pro")],
+        [InlineKeyboardButton("🟡 VIP $597  (≈ 2,400,000 Riel)",  callback_data="buy_vip")],
         [InlineKeyboardButton(s["unsure_btn"], callback_data="q_which_plan")],
         [InlineKeyboardButton(s["back_btn"],   callback_data="main_menu")],
     ])
@@ -1043,12 +1123,12 @@ def end_consult_keyboard(context):
         [InlineKeyboardButton(s["end_consult_btn"], callback_data="end_consult")],
     ])
 
-# \u2500\u2500\u2500 HANDLERS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── HANDLERS ────────────────────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text(
-        "\U0001f1f0\U0001f1ed \u1787\u17d2\u179a\u17be\u179f\u1797\u17b6\u179f\u17b6  |  \U0001f1ec\U0001f1e7 Choose language:",
+        "🇰🇭 ជ្រើសភាសា  |  🇬🇧 Choose language:",
         reply_markup=lang_keyboard()
     )
 
@@ -1154,15 +1234,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=ADMIN_ID,
                     text=(
-                        f"\U0001f4ac *Kh\xe1ch c\u1ea7n t\u01b0 v\u1ea5n [{lang.upper()}]*\n"
-                        f"\U0001f464 {user.full_name} (@{user.username or 'no username'})\n"
+                        f"💬 *Khách cần tư vấn [{lang.upper()}]*\n"
+                        f"👤 {user.full_name} (@{user.username or 'no username'})\n"
                         f"`#cid:{user.id}`"
                     ),
                     parse_mode="Markdown"
                 )
             except Exception as e:
                 logging.error(f"Admin notify error: {e}")
-            # Ghi v\xe0o Sheet CRM
+            # Ghi vào Sheet CRM
             asyncio.create_task(_post_to_sheet({
                 "name":     user.full_name,
                 "telegram": f"@{user.username}" if user.username else str(user.id),
@@ -1187,7 +1267,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(s["ask_bill"], parse_mode="Markdown")
         return
 
-# \u2500\u2500\u2500 MESSAGE HANDLER \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── MESSAGE HANDLER ─────────────────────────────────────────────────────────
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     awaiting   = context.user_data.get("awaiting")
@@ -1195,7 +1275,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user       = update.effective_user
     s          = C(context)["s"]
 
-    # Admin reply \u2192 forward to customer
+    # Admin reply → forward to customer
     if (
         user.id == ADMIN_ID
         and update.message.reply_to_message
@@ -1207,37 +1287,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cust_id  = int(cid_text.split()[0])
             await context.bot.send_message(
                 chat_id=cust_id,
-                text=f"\U0001f4ac *NiMo:*\n\n{update.message.text}",
+                text=f"💬 *NiMo:*\n\n{update.message.text}",
                 parse_mode="Markdown"
             )
-            await update.message.reply_text("\u2705 Sent.")
+            await update.message.reply_text("✅ Sent.")
         except Exception as e:
-            await update.message.reply_text(f"\u274c {e}")
+            await update.message.reply_text(f"❌ {e}")
         return
 
-    # Consulting mode \u2192 forward to admin
+    # Consulting mode → forward to admin
     if consulting and not awaiting:
         text = update.message.text or "(media)"
         if ADMIN_ID:
             try:
                 fwd = (
-                    f"\U0001f4ac *{user.full_name}* (@{user.username or 'no username'})\n"
-                    f"\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n{text}\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n`#cid:{user.id}`"
+                    f"💬 *{user.full_name}* (@{user.username or 'no username'})\n"
+                    f"━━━━━━━━━━━━━\n{text}\n━━━━━━━━━━━━━\n`#cid:{user.id}`"
                 )
                 await context.bot.send_message(chat_id=ADMIN_ID, text=fwd, parse_mode="Markdown")
                 if update.message.photo:
                     await context.bot.send_photo(
                         chat_id=ADMIN_ID,
                         photo=update.message.photo[-1].file_id,
-                        caption=f"\U0001f4f8 {user.full_name}\n`#cid:{user.id}`",
+                        caption=f"📸 {user.full_name}\n`#cid:{user.id}`",
                         parse_mode="Markdown"
                     )
             except Exception as e:
                 logging.error(f"Forward error: {e}")
-        await update.message.reply_text("\u2705", reply_markup=end_consult_keyboard(context))
+        await update.message.reply_text("✅", reply_markup=end_consult_keyboard(context))
         return
 
-    # No active flow \u2192 show options
+    # No active flow → show options
     if not awaiting:
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton(s["view_payment_btn"], callback_data="buy")],
@@ -1253,8 +1333,45 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(s["need_photo"], parse_mode="Markdown")
             return
         context.user_data["bill_photo_id"] = update.message.photo[-1].file_id
-        context.user_data["awaiting"]       = "name"
-        await update.message.reply_text(s["ask_name"], parse_mode="Markdown")
+
+        # OCR: extract APV from bill screenshot and match against PayWay store
+        apv_info = None
+        if ANTHROPIC_API_KEY:
+            lang = get_lang(context)
+            checking_msg = "🔍 កំពុងផ្ទៀងផ្ទាត់ការបង់ប្រាក់..." if lang == "km" else "🔍 Verifying payment..."
+            checking = await update.message.reply_text(checking_msg)
+            try:
+                photo_file  = await update.message.photo[-1].get_file()
+                photo_bytes = bytes(await photo_file.download_as_bytearray())
+                ocr_apv     = await _ocr_bill_image(photo_bytes)
+                if ocr_apv and ocr_apv in _apv_store:
+                    apv_info = _apv_store.pop(ocr_apv)
+                    context.user_data["apv_verified"] = True
+                    context.user_data["apv_code"]     = ocr_apv
+                    context.user_data["apv_amount"]   = apv_info["amount"]
+                    logging.info(f"APV {ocr_apv} matched for user {user.id}")
+                else:
+                    context.user_data["apv_verified"] = False
+                    logging.info(f"OCR APV={ocr_apv!r} not found in store for user {user.id}")
+            except Exception as e:
+                logging.error(f"OCR bill error: {e}")
+                context.user_data["apv_verified"] = False
+            try:
+                await checking.delete()
+            except Exception:
+                pass
+
+        context.user_data["awaiting"] = "name"
+        if apv_info:
+            lang = get_lang(context)
+            verified_prefix = (
+                "✅ *ការបង់ប្រាក់ត្រូវបានផ្ទៀងផ្ទាត់! 🎉*\n\n"
+                if lang == "km" else
+                "✅ *Payment verified! 🎉*\n\n"
+            )
+            await update.message.reply_text(verified_prefix + s["ask_name"], parse_mode="Markdown")
+        else:
+            await update.message.reply_text(s["ask_name"], parse_mode="Markdown")
         return
 
     # Name step
@@ -1267,7 +1384,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(s["ask_phone"], parse_mode="Markdown")
         return
 
-    # Phone step \u2192 complete
+    # Phone step → complete
     if awaiting == "phone":
         if not update.message.text:
             await update.message.reply_text(s["need_text"])
@@ -1280,7 +1397,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         package = context.user_data["package"]
         info    = BANK_INFO[package]
 
-        # Ghi \u0111\u01a1n v\xe0o Google Sheet CRM
+        # Ghi đơn vào Google Sheet CRM
         asyncio.create_task(_post_to_sheet({
             "name":     context.user_data.get("name", ""),
             "phone":    context.user_data["phone"],
@@ -1304,15 +1421,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         if ADMIN_ID:
-            lang = get_lang(context)
+            lang         = get_lang(context)
+            apv_verified = context.user_data.get("apv_verified", False)
+            apv_code     = context.user_data.get("apv_code", "")
+            apv_line     = (
+                f"✅ *APV {apv_code} — PAYMENT VERIFIED*\n"
+                if apv_verified else
+                "⚠️ *APV not matched — manual check needed*\n"
+            )
             msg  = (
-                f"\U0001f534 *\u0110\u01a0N M\u1edaI [{lang.upper()}]*\n\n"
-                f"\U0001f4cb M\xe3 \u0111\u01a1n: `{context.user_data['order_id']}`\n"
-                f"\U0001f464 T\xean: {context.user_data['name']}\n"
-                f"\U0001f4f1 S\u0110T: {context.user_data['phone']}\n"
-                f"\U0001f4e6 G\xf3i: *{info['label']}* \u2014 {info['price_usd']}\n"
-                f"\U0001f194 Telegram ID: `{user.id}`\n\n"
-                f"\U0001f449 L\u1ec7nh x\xe1c nh\u1eadn:\n"
+                f"🔴 *ĐƠN MỚI [{lang.upper()}]*\n\n"
+                f"{apv_line}\n"
+                f"📋 Mã đơn: `{context.user_data['order_id']}`\n"
+                f"👤 Tên: {context.user_data['name']}\n"
+                f"📱 SĐT: {context.user_data['phone']}\n"
+                f"📦 Gói: *{info['label']}* — {info['price_usd']}\n"
+                f"🆔 Telegram ID: `{user.id}`\n\n"
+                f"👉 Lệnh xác nhận:\n"
                 f"`/xacnhan {context.user_data['order_id']} {package}`"
             )
             try:
@@ -1326,17 +1451,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logging.error(f"Admin notify error: {e}")
         return
 
-# \u2500\u2500\u2500 ADMIN COMMANDS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── ADMIN COMMANDS ──────────────────────────────────────────────────────────
 
 async def xacnhan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("\u26d4")
+        await update.message.reply_text("⛔")
         return
     if len(context.args) < 2:
         await update.message.reply_text("Syntax: `/xacnhan NIMO-ID package`", parse_mode="Markdown")
         return
     await update.message.reply_text(
-        f"\u2705 Confirmed order `{context.args[0]}` \u2014 plan `{context.args[1]}`.\n"
+        f"✅ Confirmed order `{context.args[0]}` — plan `{context.args[1]}`.\n"
         "_Auto-delivery will be added in the next step._",
         parse_mode="Markdown"
     )
@@ -1344,7 +1469,7 @@ async def xacnhan(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def tra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin replies to customer: /tra <customer_id> <message>"""
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("\u26d4")
+        await update.message.reply_text("⛔")
         return
     if len(context.args) < 2:
         await update.message.reply_text("Syntax: `/tra <customer_id> <message>`", parse_mode="Markdown")
@@ -1354,14 +1479,14 @@ async def tra(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = " ".join(context.args[1:])
         await context.bot.send_message(
             chat_id=cid,
-            text=f"\U0001f4ac *NiMo:*\n\n{text}",
+            text=f"💬 *NiMo:*\n\n{text}",
             parse_mode="Markdown"
         )
-        await update.message.reply_text("\u2705 Sent.")
+        await update.message.reply_text("✅ Sent.")
     except Exception as e:
-        await update.message.reply_text(f"\u274c {e}")
+        await update.message.reply_text(f"❌ {e}")
 
-# \u2500\u2500\u2500 MAIN \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# ─── MAIN ────────────────────────────────────────────────────────────────────
 
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -1369,8 +1494,17 @@ def main():
     app.add_handler(CommandHandler("xacnhan", xacnhan))
     app.add_handler(CommandHandler("tra",     tra))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_message))
-    print("\u2705 Bot (KM + EN) \u0111ang ch\u1ea1y... /start \u0111\u1ec3 test!")
+    # Group handler: captures PayWay APV notifications from DONE Money group
+    app.add_handler(MessageHandler(
+        filters.ChatType.GROUPS & (filters.TEXT | filters.CAPTION),
+        handle_group_message
+    ))
+    # Private chat handler: buy flow + FAQ + consulting
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & (filters.PHOTO | filters.TEXT & ~filters.COMMAND),
+        handle_message
+    ))
+    print("✅ Bot (KM + EN) đang chạy... /start để test!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
